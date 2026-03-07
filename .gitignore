@@ -1,0 +1,38 @@
+# Credentials & secrets
+credentials/*.json
+credentials/*.token
+*.token
+client_secret*.json
+
+# Databases
+manifests/*.db
+manifests/*.db-shm
+manifests/*.db-wal
+
+# Logs & reports
+logs/
+reports/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# IDE
+.vscode/
+.idea/
+
+# Keep directory structure
+!credentials/.gitkeep
+!manifests/.gitkeep
+!logs/.gitkeep
+!reports/.gitkeep
+credentials/onedrive_credentials.txt

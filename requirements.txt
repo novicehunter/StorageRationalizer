@@ -1,0 +1,15 @@
+# Core
+msal>=1.20.0
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0
+requests>=2.28.0
+
+# iCloud Photos (macOS only)
+osxphotos>=0.64.0
+
+# Tracker UI
+flask>=3.0.0
+
+# Optional: faster hashing
+# xxhash>=3.0.0
