@@ -145,6 +145,51 @@
   .monitor-table td:nth-child(3) { color: var(--yellow); }
   .monitor-table td:nth-child(4) { color: var(--red); }
   .monitor-log-pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; color: var(--muted); max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
+
+  /* ── Rollback Tab ───────────────────────────────────────────── */
+  .rb-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+  .rb-run-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:12px; overflow:hidden; }
+  .rb-run-header { display:flex; align-items:center; gap:12px; padding:14px 18px; cursor:pointer; user-select:none; }
+  .rb-run-header:hover { background:rgba(255,255,255,0.03); }
+  .rb-run-id { font-family:monospace; font-size:13px; color:var(--accent); font-weight:600; }
+  .rb-run-meta { color:var(--muted); font-size:12px; display:flex; gap:10px; flex-wrap:wrap; }
+  .rb-run-badges { display:flex; gap:6px; margin-left:auto; align-items:center; }
+  .rb-badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; white-space:nowrap; }
+  .rb-badge-green  { background:rgba(62,207,142,.15); color:var(--green); border:1px solid rgba(62,207,142,.3); }
+  .rb-badge-red    { background:rgba(224,92,101,.15);  color:var(--red);   border:1px solid rgba(224,92,101,.3); }
+  .rb-badge-blue   { background:rgba(91,141,238,.15);  color:var(--accent);border:1px solid rgba(91,141,238,.3); }
+  .rb-badge-purple { background:rgba(167,139,250,.15); color:var(--purple);border:1px solid rgba(167,139,250,.3); }
+  .rb-body { display:none; padding:0 18px 16px; }
+  .rb-body.open { display:block; }
+  .rb-section-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:14px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border); }
+  .rb-source-row { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid rgba(255,255,255,.04); font-size:13px; }
+  .rb-source-row:last-child { border-bottom:none; }
+  .rb-src-name { font-family:monospace; color:var(--accent); width:160px; flex-shrink:0; }
+  .rb-src-count { color:var(--text); width:60px; }
+  .rb-src-size  { color:var(--muted); width:80px; font-size:12px; }
+  .rb-src-restored { font-size:11px; color:var(--green); width:80px; }
+  .rb-folder-row { display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; border-bottom:1px solid rgba(255,255,255,.03); }
+  .rb-folder-row:last-child { border-bottom:none; }
+  .rb-folder-path { font-family:monospace; color:var(--muted); flex:1; word-break:break-all; }
+  .rb-folder-cnt  { color:var(--text); white-space:nowrap; width:50px; text-align:right; }
+  .rb-file-table  { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+  .rb-file-table th { text-align:left; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.4px; padding:4px 8px 6px; border-bottom:1px solid var(--border); }
+  .rb-file-table td { padding:5px 8px; border-bottom:1px solid rgba(255,255,255,.03); vertical-align:middle; }
+  .rb-file-table tr:last-child td { border-bottom:none; }
+  .rb-restored-badge { font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px; background:rgba(62,207,142,.15); color:var(--green); border:1px solid rgba(62,207,142,.3); }
+  .rb-error-badge { font-size:10px; padding:1px 7px; border-radius:999px; background:rgba(224,92,101,.1); color:var(--red); border:1px solid rgba(224,92,101,.25); }
+  .rb-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .rb-confirm-overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; z-index:1000; }
+  .rb-confirm-box { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:28px 32px; max-width:440px; width:90%; }
+  .rb-confirm-box h3 { margin-bottom:8px; color:var(--red); }
+  .rb-confirm-box p { color:var(--muted); font-size:13px; margin-bottom:20px; line-height:1.6; }
+  .rb-confirm-actions { display:flex; gap:10px; justify-content:flex-end; }
+  .btn-danger { background:var(--red); border-color:var(--red); color:#fff; }
+  .btn-danger:hover { background:#c94f58; }
+  .rb-search { background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:13px; padding:6px 10px; outline:none; width:220px; }
+  .rb-search:focus { border-color:var(--accent); }
+  .rb-spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; margin-right:6px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -167,6 +212,7 @@
   <div class="tab-nav">
     <button class="tab-btn active" id="tab-btn-tracker" onclick="switchTab('tracker')">Setup Tracker</button>
     <button class="tab-btn" id="tab-btn-cleanup" onclick="switchTab('cleanup')">&#9685; Cleanup Monitor</button>
+    <button class="tab-btn" id="tab-btn-rollback" onclick="switchTab('rollback')">&#8635; Rollback</button>
   </div>
 
   <!-- ═══ Tab: Setup Tracker ═══ -->
@@ -681,6 +727,36 @@
 
   </div><!-- /tab-cleanup -->
 
+  <!-- ═══ Tab: Rollback ═══ -->
+  <div id="tab-rollback" class="tab-pane">
+
+    <div class="rb-toolbar">
+      <button class="btn btn-accent" onclick="rbSync()">
+        <span id="rb-sync-spinner" class="rb-spinner" style="display:none"></span>
+        Sync Logs
+      </button>
+      <span id="rb-summary" style="color:var(--muted);font-size:13px">Loading…</span>
+      <input class="rb-search" id="rb-search" placeholder="Search files…" oninput="rbSearchChange()" style="margin-left:auto">
+    </div>
+
+    <div id="rb-runs-container">
+      <div style="color:var(--muted);padding:24px;text-align:center">Loading cleanup runs…</div>
+    </div>
+
+    <!-- Confirm dialog (hidden by default) -->
+    <div id="rb-confirm-overlay" class="rb-confirm-overlay" style="display:none">
+      <div class="rb-confirm-box">
+        <h3>Confirm Restore</h3>
+        <p id="rb-confirm-msg">Are you sure?</p>
+        <div class="rb-confirm-actions">
+          <button class="btn" onclick="rbConfirmCancel()">Cancel</button>
+          <button class="btn btn-danger" id="rb-confirm-ok" onclick="rbConfirmGo()">Restore</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tab-rollback -->
+
 </div><!-- /container -->
 
 <script>
@@ -801,7 +877,8 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   document.getElementById('tab-btn-' + name).classList.add('active');
-  if (name === 'cleanup') fetchCleanupStatus();
+  if (name === 'cleanup')  fetchCleanupStatus();
+  if (name === 'rollback') rbLoadRuns();
 }
 
 // ── Cleanup Monitor ───────────────────────────────────────────────────────────
@@ -906,6 +983,288 @@ function startCleanupRefresh() {
       fetchCleanupStatus();
     }
   }, 10000);
+}
+
+// ── Rollback ──────────────────────────────────────────────────────────────────
+let _rbRuns  = [];
+let _rbPendingRestore = null;   // {scope, run_id, source, folder, file_ids, label}
+let _rbOpenRuns = new Set();    // run_ids that are expanded
+
+function rbFmtSize(bytes) {
+  if (!bytes) return '—';
+  const u = ['B','KB','MB','GB','TB'];
+  let b = bytes;
+  for (const unit of u) { if (b < 1024) return b.toFixed(1) + ' ' + unit; b /= 1024; }
+  return b.toFixed(1) + ' PB';
+}
+
+function rbFmtDate(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+async function rbSync() {
+  const sp = $('rb-sync-spinner');
+  sp.style.display = 'inline-block';
+  try {
+    // Force re-sync by calling runs endpoint (it auto-syncs new logs)
+    await fetch('/api/rollback/runs');
+    await rbLoadRuns();
+  } finally {
+    sp.style.display = 'none';
+  }
+}
+
+async function rbLoadRuns() {
+  const container = $('rb-runs-container');
+  try {
+    const res  = await fetch('/api/rollback/runs');
+    _rbRuns    = await res.json();
+    if (!_rbRuns.length) {
+      container.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center">No cleanup runs found. Click <strong>Sync Logs</strong> to import.</div>';
+      $('rb-summary').textContent = 'No runs';
+      return;
+    }
+    const totalFiles    = _rbRuns.reduce((s, r) => s + (r.total_deleted || 0), 0);
+    const totalRestored = _rbRuns.reduce((s, r) => s + (r.restored || 0), 0);
+    $('rb-summary').textContent = `${_rbRuns.length} run(s) · ${totalFiles.toLocaleString()} files tracked · ${totalRestored.toLocaleString()} restored`;
+    rbRenderRuns();
+  } catch (e) {
+    container.innerHTML = `<div style="color:var(--red)">Error: ${escHtml(String(e))}</div>`;
+  }
+}
+
+function rbRenderRuns() {
+  const search    = ($('rb-search').value || '').toLowerCase();
+  const container = $('rb-runs-container');
+  container.innerHTML = _rbRuns.map(run => rbRunCard(run, search)).join('');
+}
+
+function rbRunCard(run, search) {
+  const restored  = run.restored   || 0;
+  const pending   = run.pending    || 0;
+  const mode      = run.mode       || '—';
+  const isOpen    = _rbOpenRuns.has(run.run_id);
+
+  const completeBadge = run.is_complete
+    ? '<span class="rb-badge rb-badge-green">Complete</span>'
+    : '<span class="rb-badge rb-badge-blue">Partial</span>';
+  const restBadge = restored > 0
+    ? `<span class="rb-badge rb-badge-purple">${restored} restored</span>` : '';
+
+  // Source rows
+  const srcRows = (run.sources || []).map(s =>
+    `<div class="rb-source-row">
+       <span class="rb-src-name">${escHtml(s.source)}</span>
+       <span class="rb-src-count">${(s.cnt||0).toLocaleString()} files</span>
+       <span class="rb-src-size">${rbFmtSize(s.total_sz)}</span>
+       <span class="rb-src-restored">${s.restored_cnt > 0 ? '✓ ' + s.restored_cnt + ' restored' : ''}</span>
+       <span style="margin-left:auto;display:flex;gap:6px">
+         <button class="btn" style="font-size:11px;padding:3px 10px"
+           onclick="rbShowFiles('${run.run_id}','${escHtml(s.source)}')">View Files</button>
+         <button class="btn" style="font-size:11px;padding:3px 10px;color:var(--red)"
+           onclick="rbAskRestore({scope:'source',run_id:'${run.run_id}',source:'${escHtml(s.source)}',label:'${(s.cnt||0)} files from ${escHtml(s.source)}'})">
+           Restore Source</button>
+       </span>
+     </div>`
+  ).join('');
+
+  const body = `
+    <div class="rb-actions">
+      <button class="btn btn-danger" style="font-size:12px"
+        onclick="rbAskRestore({scope:'run',run_id:'${run.run_id}',label:'all ${pending} pending files in run ${run.run_id}'})">
+        Full Rollback (${pending} files)</button>
+      <button class="btn" style="font-size:12px"
+        onclick="rbShowFiles('${run.run_id}','')">Browse All Files</button>
+    </div>
+    <div class="rb-section-title">By Source</div>
+    ${srcRows || '<div style="color:var(--muted);font-size:12px">No source data</div>'}
+    <div id="rb-files-${run.run_id}" style="margin-top:12px"></div>`;
+
+  return `<div class="rb-run-card" id="rbcard-${run.run_id}">
+    <div class="rb-run-header" onclick="rbToggleRun('${run.run_id}')">
+      <div>
+        <div class="rb-run-id">${run.run_id}</div>
+        <div class="rb-run-meta">
+          <span>${rbFmtDate(run.timestamp)}</span>
+          <span>Mode: <strong>${escHtml(mode)}</strong></span>
+          <span>${(run.total_deleted||0).toLocaleString()} deleted</span>
+          <span>${rbFmtSize(run.total_size)}</span>
+        </div>
+      </div>
+      <div class="rb-run-badges">${completeBadge}${restBadge}
+        <span style="color:var(--muted);font-size:12px">${isOpen ? '▲' : '▼'}</span>
+      </div>
+    </div>
+    <div class="rb-body ${isOpen ? 'open' : ''}" id="rbbody-${run.run_id}">${isOpen ? body : ''}</div>
+  </div>`;
+}
+
+function rbToggleRun(run_id) {
+  const body = $('rbbody-' + run_id);
+  if (!body) return;
+  const isOpen = body.classList.contains('open');
+  if (isOpen) {
+    _rbOpenRuns.delete(run_id);
+    body.classList.remove('open');
+    body.innerHTML = '';
+  } else {
+    _rbOpenRuns.add(run_id);
+    const run = _rbRuns.find(r => r.run_id === run_id);
+    if (run) {
+      const srcRows = (run.sources || []).map(s =>
+        `<div class="rb-source-row">
+           <span class="rb-src-name">${escHtml(s.source)}</span>
+           <span class="rb-src-count">${(s.cnt||0).toLocaleString()} files</span>
+           <span class="rb-src-size">${rbFmtSize(s.total_sz)}</span>
+           <span class="rb-src-restored">${s.restored_cnt > 0 ? '✓ ' + s.restored_cnt + ' restored' : ''}</span>
+           <span style="margin-left:auto;display:flex;gap:6px">
+             <button class="btn" style="font-size:11px;padding:3px 10px"
+               onclick="rbShowFiles('${run.run_id}','${escHtml(s.source)}')">View Files</button>
+             <button class="btn" style="font-size:11px;padding:3px 10px;color:var(--red)"
+               onclick="rbAskRestore({scope:'source',run_id:'${run.run_id}',source:'${escHtml(s.source)}',label:'${(s.cnt||0)} files from ${escHtml(s.source)}'})">
+               Restore Source</button>
+           </span>
+         </div>`
+      ).join('');
+      const pending = run.pending || 0;
+      body.innerHTML = `
+        <div class="rb-actions">
+          <button class="btn btn-danger" style="font-size:12px"
+            onclick="rbAskRestore({scope:'run',run_id:'${run.run_id}',label:'all ${pending} pending files in run ${run.run_id}'})">
+            Full Rollback (${pending} files)</button>
+          <button class="btn" style="font-size:12px"
+            onclick="rbShowFiles('${run.run_id}','')">Browse All Files</button>
+        </div>
+        <div class="rb-section-title">By Source</div>
+        ${srcRows || '<div style="color:var(--muted);font-size:12px">No source data</div>'}
+        <div id="rb-files-${run.run_id}" style="margin-top:12px"></div>`;
+      body.classList.add('open');
+    }
+  }
+}
+
+async function rbShowFiles(run_id, source) {
+  const container = $('rb-files-' + run_id);
+  if (!container) return;
+  container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0"><span class="rb-spinner"></span>Loading files…</div>';
+
+  const params = new URLSearchParams({run_id});
+  if (source) params.set('source', source);
+  const search = $('rb-search').value;
+  if (search) params.set('q', search);
+
+  const res  = await fetch('/api/rollback/files?' + params);
+  const data = await res.json();
+  const files   = data.files   || [];
+  const folders = data.folders || [];
+
+  if (!files.length) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0">No files found.</div>';
+    return;
+  }
+
+  // Folder breakdown
+  const folderRows = folders.slice(0, 20).map(f =>
+    `<div class="rb-folder-row">
+       <span class="rb-folder-path" title="${escHtml(f.parent_folder||'')}">${escHtml(f.parent_folder||'—')}</span>
+       <span class="rb-folder-cnt">${(f.cnt||0)}</span>
+       <span style="color:var(--muted);font-size:11px;width:70px">${rbFmtSize(f.total_sz)}</span>
+       <button class="btn" style="font-size:10px;padding:2px 8px;margin-left:6px"
+         onclick="rbAskRestore({scope:'folder',run_id:'${run_id}',folder:'${escHtml((f.parent_folder||'').replace(/'/g,"\\\'"))}',label:'${(f.cnt||0)} files from ${escHtml(f.parent_folder||'').replace(/'/g,"\\\'")}'})">
+         Restore</button>
+     </div>`
+  ).join('');
+
+  // File rows
+  const fileRows = files.map(f => {
+    const isRestored = f.restored;
+    const badge = isRestored
+      ? `<span class="rb-restored-badge">&#10003; Restored</span>`
+      : (f.restore_error
+          ? `<span class="rb-error-badge" title="${escHtml(f.restore_error||'')}">Failed</span>`
+          : '');
+    const restoreBtn = isRestored ? '' :
+      `<button class="btn" style="font-size:10px;padding:2px 8px"
+         onclick="rbAskRestore({scope:'files',run_id:'${run_id}',file_ids:[${f.id}],label:'${escHtml(f.filename.replace(/'/g,"\\\'"))}'})">
+         Restore</button>`;
+    const pathCell = f.source_path
+      ? `<span style="font-family:monospace;font-size:11px;color:var(--muted)" title="${escHtml(f.source_path)}">${escHtml(f.source_path.length > 60 ? '…' + f.source_path.slice(-57) : f.source_path)}</span>`
+      : `<span style="color:var(--muted);font-size:11px">${escHtml(f.cloud_id||'—')}</span>`;
+    return `<tr>
+      <td style="font-family:monospace;color:var(--accent);font-size:11px">${escHtml(f.source)}</td>
+      <td>${escHtml(f.filename)}</td>
+      <td>${pathCell}</td>
+      <td style="color:var(--muted);font-size:11px;white-space:nowrap">${rbFmtSize(f.file_size)}</td>
+      <td>${badge}</td>
+      <td>${restoreBtn}</td>
+    </tr>`;
+  }).join('');
+
+  const titleSuffix = source ? ` — ${source}` : '';
+  container.innerHTML = `
+    <div class="rb-section-title">Folders${titleSuffix} (${folders.length})</div>
+    <div style="max-height:200px;overflow-y:auto;margin-bottom:12px">${folderRows}</div>
+    <div class="rb-section-title">Files (${files.length})</div>
+    <div style="max-height:340px;overflow-y:auto">
+      <table class="rb-file-table">
+        <thead><tr><th>Source</th><th>Filename</th><th>Path / Cloud ID</th><th>Size</th><th>Status</th><th></th></tr></thead>
+        <tbody>${fileRows}</tbody>
+      </table>
+    </div>`;
+}
+
+function rbSearchChange() {
+  // Re-render open run file panels
+  _rbOpenRuns.forEach(run_id => {
+    const container = $('rb-files-' + run_id);
+    if (container && container.innerHTML.includes('<table')) {
+      // Determine which source was loaded
+      rbShowFiles(run_id, '');
+    }
+  });
+}
+
+// Confirm dialog
+function rbAskRestore(payload) {
+  _rbPendingRestore = payload;
+  $('rb-confirm-msg').textContent = `Restore ${payload.label}? This will move files back to their original locations.`;
+  $('rb-confirm-overlay').style.display = 'flex';
+}
+function rbConfirmCancel() {
+  _rbPendingRestore = null;
+  $('rb-confirm-overlay').style.display = 'none';
+}
+async function rbConfirmGo() {
+  const p = _rbPendingRestore;
+  if (!p) return;
+  $('rb-confirm-overlay').style.display = 'none';
+
+  const btn = $('rb-confirm-ok');
+  btn.disabled = true;
+  btn.textContent = 'Restoring…';
+
+  try {
+    const res  = await fetch('/api/rollback/restore', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(p),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const msg = `Done — ${data.restored}/${data.total} restored${data.failed ? ', ' + data.failed + ' failed' : ''}.`;
+      alert(msg + (data.report ? `\n\nReport: reports/${data.report}` : ''));
+      await rbLoadRuns();
+    } else {
+      alert('Restore error: ' + (data.error || 'Unknown'));
+    }
+  } catch (e) {
+    alert('Request failed: ' + e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Restore';
+    _rbPendingRestore = null;
+  }
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

@@ -6,9 +6,13 @@ Open: http://localhost:5000
 Data: saved to tracker_data.db in the same folder
 """
 
-import sqlite3, json, os, glob, re
+import sqlite3, json, os, glob, re, sys
 from flask import Flask, render_template, request, jsonify, send_file
 from datetime import datetime, timezone
+
+# Allow importing rollback.py from the same directory
+sys.path.insert(0, os.path.dirname(__file__))
+import rollback as _rb
 
 app = Flask(__name__)
 DB       = os.path.join(os.path.dirname(__file__), "tracker_data.db")
@@ -272,6 +276,136 @@ def cleanup_status():
         "source_breakdown":  source_counts,
         "last_lines":        last_lines,
     })
+
+# ── Rollback API ──────────────────────────────────────────────────────────────
+
+@app.route("/api/rollback/runs")
+def rollback_runs():
+    """List all cleanup runs tracked in rollback.db, auto-syncing if stale."""
+    _rb.init_db()
+    # Auto-sync any log files not yet in the DB
+    db = _rb.get_db()
+    existing = {r["run_id"] for r in db.execute("SELECT run_id FROM cleanup_runs").fetchall()}
+    db.close()
+    for lf in sorted(glob.glob(str(_rb.LOGS_DIR / "cleanup_*.log"))):
+        rid = os.path.basename(lf).replace("cleanup_", "").replace(".log", "")
+        if rid not in existing:
+            _rb.sync_all_logs(verbose=False)
+            break
+
+    db = _rb.get_db()
+    rows = db.execute("""
+        SELECT r.*,
+               (SELECT COUNT(*) FROM deleted_files d WHERE d.run_id=r.run_id AND d.restored=0) AS pending,
+               (SELECT COUNT(*) FROM deleted_files d WHERE d.run_id=r.run_id AND d.restored=1) AS restored
+        FROM cleanup_runs r
+        ORDER BY r.timestamp DESC
+    """).fetchall()
+    db.close()
+
+    runs = []
+    for row in rows:
+        r = dict(row)
+        # Per-source summary
+        db2 = _rb.get_db()
+        sources = db2.execute("""
+            SELECT source, COUNT(*) as cnt,
+                   SUM(file_size) as total_sz,
+                   SUM(CASE WHEN restored=1 THEN 1 ELSE 0 END) as restored_cnt
+            FROM deleted_files WHERE run_id=?
+            GROUP BY source ORDER BY cnt DESC
+        """, (r["run_id"],)).fetchall()
+        r["sources"] = [dict(s) for s in sources]
+        db2.close()
+        runs.append(r)
+
+    return jsonify(runs)
+
+
+@app.route("/api/rollback/files")
+def rollback_files():
+    """List deleted files for a run, with optional source/folder/search filters."""
+    run_id = request.args.get("run_id", "")
+    source = request.args.get("source", "")
+    folder = request.args.get("folder", "")
+    search = request.args.get("q", "")
+
+    _rb.init_db()
+    db = _rb.get_db()
+
+    params = [run_id]
+    where  = "run_id=?"
+    if source:
+        where += " AND source=?";  params.append(source)
+    if folder:
+        where += " AND parent_folder=?"; params.append(folder)
+    if search:
+        where += " AND filename LIKE ?";  params.append(f"%{search}%")
+
+    rows = db.execute(
+        f"SELECT * FROM deleted_files WHERE {where} ORDER BY deleted_at DESC",
+        params
+    ).fetchall()
+
+    # Also return folder breakdown for the run (unfiltered)
+    folders = db.execute("""
+        SELECT parent_folder,
+               COUNT(*) as cnt,
+               SUM(file_size) as total_sz,
+               SUM(CASE WHEN restored=1 THEN 1 ELSE 0 END) as restored_cnt
+        FROM deleted_files WHERE run_id=? AND parent_folder IS NOT NULL
+        GROUP BY parent_folder ORDER BY cnt DESC
+    """, (run_id,)).fetchall()
+    db.close()
+
+    return jsonify({
+        "files":   [dict(r) for r in rows],
+        "folders": [dict(f) for f in folders],
+    })
+
+
+@app.route("/api/rollback/restore", methods=["POST"])
+def rollback_restore():
+    """
+    Trigger a restore operation.
+    Body: {run_id, scope: "run"|"source"|"folder"|"files",
+           source?, folder?, file_ids?: [int]}
+    """
+    data    = request.json or {}
+    run_id  = data.get("run_id", "")
+    scope   = data.get("scope", "")
+    source  = data.get("source", "")
+    folder  = data.get("folder", "")
+    fids    = data.get("file_ids", [])
+
+    _rb.init_db()
+
+    if scope == "files" and fids:
+        ids = [int(i) for i in fids]
+    elif run_id and scope in ("run", "source", "folder"):
+        ids = _rb.build_restore_ids(run_id, scope, source=source, folder=folder)
+    else:
+        return jsonify({"ok": False, "error": "Invalid scope or missing run_id"}), 400
+
+    if not ids:
+        return jsonify({"ok": True, "results": [], "report": None,
+                        "msg": "No restorable files matched"})
+
+    results     = _rb.restore_files(ids)
+    report_path = _rb.generate_report(run_id or "manual", results)
+
+    ok_n   = sum(1 for r in results if r["ok"])
+    fail_n = len(results) - ok_n
+
+    return jsonify({
+        "ok":      True,
+        "total":   len(results),
+        "restored": ok_n,
+        "failed":  fail_n,
+        "report":  os.path.basename(report_path),
+        "results": results,
+    })
+
 
 if __name__ == "__main__":
     init_db()
