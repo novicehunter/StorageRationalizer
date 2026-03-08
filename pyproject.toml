@@ -5,6 +5,7 @@ target-version = ['py39', 'py310', 'py311']
 [tool.mypy]
 python_version = "3.9"
 ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

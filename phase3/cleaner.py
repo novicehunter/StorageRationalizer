@@ -23,14 +23,21 @@ Usage:
     python3 cleaner.py --mode all --source onedrive  # one source at a time
 """
 
-import sqlite3, json, argparse, os, shutil, time
-from pathlib import Path
+import argparse
+import json
+import logging
+import shutil
+import sqlite3
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
-from rich.table import Table
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.prompt import Confirm
+from rich.table import Table
+
+_logger = logging.getLogger(__name__)
 
 console = Console()
 
@@ -41,7 +48,20 @@ MANIFEST_DB = BASE / "manifests" / "manifest.db"
 DUPES_DB = BASE / "manifests" / "duplicates.db"
 LOGS_DIR = BASE / "logs"
 
-PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".tiff", ".bmp", ".webp", ".raw", ".cr2", ".dng"}
+PHOTO_EXTS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".heic",
+    ".heif",
+    ".gif",
+    ".tiff",
+    ".bmp",
+    ".webp",
+    ".raw",
+    ".cr2",
+    ".dng",
+}
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".wmv", ".3gp", ".mts", ".m2ts"}
 MEDIA_EXTS = PHOTO_EXTS | VIDEO_EXTS
 
@@ -80,7 +100,7 @@ def build_query(mode: str, source_filter: str) -> tuple:
     docs: 90%+ confidence, no media
     all:  100% all types + 90%+ docs
     """
-    source_clause = f"AND m.source = ?" if source_filter else ""
+    source_clause = "AND m.source = ?" if source_filter else ""
     params = []
     if source_filter:
         params.append(source_filter)
@@ -159,7 +179,9 @@ def get_onedrive_token():
                 if cached.get("expires_at", 0) > datetime.now().timestamp() + 60:
                     return cached.get("access_token")
 
-        app = msal.PublicClientApplication(creds["CLIENT_ID"], authority="https://login.microsoftonline.com/consumers")
+        app = msal.PublicClientApplication(
+            creds["CLIENT_ID"], authority="https://login.microsoftonline.com/consumers"
+        )
         accounts = app.get_accounts()
         if accounts:
             result = app.acquire_token_silent(["Files.ReadWrite.All"], account=accounts[0])
@@ -173,7 +195,10 @@ def get_onedrive_token():
             token = result["access_token"]
             with open(token_file, "w") as f:
                 json.dump(
-                    {"access_token": token, "expires_at": datetime.now().timestamp() + result.get("expires_in", 3600)},
+                    {
+                        "access_token": token,
+                        "expires_at": datetime.now().timestamp() + result.get("expires_in", 3600),
+                    },
                     f,
                 )
             return token
@@ -231,7 +256,9 @@ def delete_google_drive(file_id: str, filename: str, dry_run: bool, creds, log_f
         from googleapiclient.discovery import build
 
         service = build("drive", "v3", credentials=creds)
-        service.files().update(fileId=file_id, body={"trashed": True}, supportsAllDrives=True).execute()
+        service.files().update(
+            fileId=file_id, body={"trashed": True}, supportsAllDrives=True
+        ).execute()
         log(log_file, f"TRASHED google_drive {file_id} {filename}")
         return True
     except Exception as e:
@@ -253,6 +280,7 @@ def batch_delete_onedrive(items: list, token: str, log_file) -> dict:
     """
     import requests as _requests
     import time as _time
+    from tools.api_validators import APIResponseError, validate_batch_response
 
     results = {}
     pending = list(items)
@@ -275,11 +303,28 @@ def batch_delete_onedrive(items: list, token: str, log_file) -> dict:
             # Top-level 429 — whole batch throttled
             if resp.status_code == 429:
                 wait = int(resp.headers.get("Retry-After", DEFAULT_BACKOFF))
-                log(log_file, f"BATCH_429 top-level — waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                log(
+                    log_file,
+                    f"BATCH_429 top-level — waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})",
+                )
                 _time.sleep(wait)
                 continue
-            resp.raise_for_status()
-            responses = resp.json().get("responses", [])
+
+            # Validate batch response structure (container + per-request logging)
+            try:
+                batch_data = validate_batch_response(
+                    resp,
+                    expected_request_count=len(batch_requests),
+                    context=f"batch attempt={attempt + 1}",
+                )
+                responses = batch_data.get("responses", [])
+            except APIResponseError as e:
+                _logger.error("Batch validation failed (attempt %d): %s", attempt + 1, e.message)
+                log(log_file, f"BATCH_VALIDATION_ERROR onedrive: {e.message}")
+                for _, _, cloud_id, _ in pending:
+                    results[cloud_id] = False
+                return results
+
         except Exception as e:
             log(log_file, f"BATCH_ERROR onedrive: {e}")
             for _, _, cloud_id, _ in pending:
@@ -293,22 +338,56 @@ def batch_delete_onedrive(items: list, token: str, log_file) -> dict:
             idx = int(r["id"])
             row_id, file_id, cloud_id, filename = pending[idx]
             status = r.get("status", 0)
+            body = r.get("body", {})
+
+            # Per-request validation: check status code and body error field
             if status in (200, 204):
-                log(log_file, f"TRASHED onedrive {cloud_id} {filename}")
-                results[cloud_id] = True
+                # Additional check: ensure body doesn't secretly contain an error
+                if isinstance(body, dict) and "error" in body:
+                    error_info = body["error"]
+                    error_msg = (
+                        error_info.get("message", "Unknown")
+                        if isinstance(error_info, dict)
+                        else str(error_info)
+                    )
+                    _logger.error(
+                        "OneDrive batch item %s: HTTP %s but body has error: %s",
+                        cloud_id,
+                        status,
+                        error_msg,
+                    )
+                    log(
+                        log_file,
+                        f"ERROR onedrive {cloud_id} {filename}: "
+                        f"body error despite HTTP {status}: {error_msg}",
+                    )
+                    results[cloud_id] = False
+                else:
+                    log(log_file, f"TRASHED onedrive {cloud_id} {filename}")
+                    results[cloud_id] = True
             elif status == 429:
                 # Per-item 429 — queue for retry
                 wait = int(r.get("headers", {}).get("Retry-After", DEFAULT_BACKOFF))
                 max_wait = max(max_wait, wait)
                 retry_items.append((row_id, file_id, cloud_id, filename))
             else:
+                error_info = body.get("error", {}) if isinstance(body, dict) else {}
+                error_msg = (
+                    error_info.get("message", "")
+                    if isinstance(error_info, dict)
+                    else str(error_info)
+                )
+                _logger.error(
+                    "OneDrive batch item %s failed: HTTP %s - %s", cloud_id, status, error_msg
+                )
                 log(log_file, f"ERROR onedrive {cloud_id} {filename}: HTTP {status}")
                 results[cloud_id] = False
 
         if retry_items:
             log(
                 log_file,
-                f"BATCH_429 {len(retry_items)} items throttled — waiting {max_wait}s (attempt {attempt + 1}/{MAX_RETRIES})",
+                f"BATCH_429 {len(retry_items)} items throttled — "
+                f"waiting {max_wait}s (attempt {attempt + 1}/{MAX_RETRIES})",
             )
             _time.sleep(max_wait)
             pending = retry_items
@@ -347,7 +426,9 @@ def delete_icloud_photos(file_id: str, filename: str, dry_run: bool, log_file) -
             delete thePhoto
         end tell
         """
-        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            ["osascript", "-e", script], capture_output=True, text=True, timeout=30
+        )
         if result.returncode == 0:
             log(log_file, f"DELETED icloud_photos {file_id} {filename}")
             return True
@@ -392,7 +473,9 @@ def print_dry_run_preview(rows, mode):
     console.print(table)
     console.print()
     console.print(f"  [bold]Total files to delete:[/bold] {total_files:,}")
-    console.print(f"  [bold]Total space to recover:[/bold] [green]{format_size(total_size)}[/green]")
+    console.print(
+        f"  [bold]Total space to recover:[/bold] [green]{format_size(total_size)}[/green]"
+    )
     console.print()
     console.print("  [dim]All deletions go to recoverable bins (Trash / Recycle Bin).[/dim]")
     console.print("  [dim]Run without --dry-run to execute.[/dim]")
@@ -409,7 +492,9 @@ def main():
         help="safe=100%% only | docs=90%%+ no media | all=both",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Preview what would be deleted without touching anything"
+        "--dry-run",
+        action="store_true",
+        help="Preview what would be deleted without touching anything",
     )
     parser.add_argument("--source", help="Limit to one source (e.g. onedrive)")
     parser.add_argument("--limit", type=int, default=0, help="Limit number of files (for testing)")
@@ -418,7 +503,9 @@ def main():
     console.rule("[bold red]StorageRationalizer — Phase 3 Cleaner[/bold red]")
     console.print(f"  Mode:     [cyan]{args.mode}[/cyan]")
     console.print(
-        f"  Dry run:  [cyan]{'YES — nothing will be deleted' if args.dry_run else 'NO — files will be deleted'}[/cyan]"
+        f"  Dry run:  [cyan]"
+        f"{'YES — nothing will be deleted' if args.dry_run else 'NO — files will be deleted'}"
+        "[/cyan]"
     )
     if args.source:
         console.print(f"  Source:   [cyan]{args.source}[/cyan]")
@@ -464,7 +551,9 @@ def main():
         return
 
     # Confirm before proceeding
-    if not Confirm.ask(f"[bold red]Delete {len(rows):,} files? This sends them to recoverable bins.[/bold red]"):
+    if not Confirm.ask(
+        f"[bold red]Delete {len(rows):,} files? This sends them to recoverable bins.[/bold red]"
+    ):
         console.print("[yellow]Cancelled.[/yellow]")
         return
 
@@ -508,7 +597,6 @@ def main():
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-
         task = progress.add_task("Deleting...", total=len(rows))
         completed = 0
 
@@ -520,7 +608,11 @@ def main():
             local_path = row["source_path"]
             file_id = row["file_id"]
 
-            progress.update(task, description=f"[red]Deleting[/red] [{source}] {filename[:50]}", completed=completed)
+            progress.update(
+                task,
+                description=f"[red]Deleting[/red] [{source}] {filename[:50]}",
+                completed=completed,
+            )
 
             ok = False
 
@@ -545,8 +637,12 @@ def main():
 
             if ok:
                 stats["deleted"] += 1
-                dconn.execute("UPDATE duplicate_members SET action='deleted' WHERE id=?", (row["id"],))
-                mconn.execute("UPDATE files SET scan_error='DELETED_PHASE3' WHERE file_id=?", (file_id,))
+                dconn.execute(
+                    "UPDATE duplicate_members SET action='deleted' WHERE id=?", (row["id"],)
+                )
+                mconn.execute(
+                    "UPDATE files SET scan_error='DELETED_PHASE3' WHERE file_id=?", (file_id,)
+                )
             else:
                 stats["skipped"] += 1
 
@@ -561,8 +657,11 @@ def main():
 
             progress.update(
                 task,
-                description=f"[red]Deleting[/red] [onedrive] batch {batch_start // ONEDRIVE_BATCH_SIZE + 1} "
-                f"({batch_start}–{batch_start + len(batch)})",
+                description=(
+                    f"[red]Deleting[/red] [onedrive] batch "
+                    f"{batch_start // ONEDRIVE_BATCH_SIZE + 1} "
+                    f"({batch_start}–{batch_start + len(batch)})"
+                ),
                 completed=completed,
             )
 
@@ -588,8 +687,13 @@ def main():
                 for row_id, file_id, cloud_id, _ in items:
                     if results.get(cloud_id):
                         stats["deleted"] += 1
-                        dconn.execute("UPDATE duplicate_members SET action='deleted' WHERE id=?", (row_id,))
-                        mconn.execute("UPDATE files SET scan_error='DELETED_PHASE3' WHERE file_id=?", (file_id,))
+                        dconn.execute(
+                            "UPDATE duplicate_members SET action='deleted' WHERE id=?", (row_id,)
+                        )
+                        mconn.execute(
+                            "UPDATE files SET scan_error='DELETED_PHASE3' WHERE file_id=?",
+                            (file_id,),
+                        )
                     else:
                         stats["skipped"] += 1
 
@@ -602,7 +706,11 @@ def main():
     dconn.commit()
     mconn.commit()
 
-    log(log_file, f"=== Complete — deleted={stats['deleted']} skipped={stats['skipped']} errors={stats['errors']} ===")
+    log(
+        log_file,
+        f"=== Complete — deleted={stats['deleted']} "
+        f"skipped={stats['skipped']} errors={stats['errors']} ===",
+    )
 
     # Final summary
     console.print()
@@ -622,7 +730,9 @@ def main():
     console.print(f"  [bold]Audit log:[/bold] [cyan]{log_file}[/cyan]")
     console.print()
     console.print("  [dim]Next steps:[/dim]")
-    console.print("  [dim]1. Check bins (Trash / OneDrive Recycle Bin / Google Trash) before emptying[/dim]")
+    console.print(
+        "  [dim]1. Check bins (Trash / OneDrive Recycle Bin / Google Trash) before emptying[/dim]"
+    )
     console.print("  [dim]2. Re-run Phase 1 scanner to update manifest[/dim]")
     console.print("  [dim]3. Re-run Phase 2 classifier for next round[/dim]")
     console.print()

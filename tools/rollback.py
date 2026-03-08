@@ -8,14 +8,26 @@ Trash / iCloud Photos Recently Deleted.
 Usage:
     python3 tools/rollback.py --sync
     python3 tools/rollback.py --restore --run-id 20260308_124626 --scope run
-    python3 tools/rollback.py --restore --run-id 20260308_124626 --scope source --source macbook_local
-    python3 tools/rollback.py --restore --run-id 20260308_124626 --scope folder --folder "/Users/foo/Downloads"
+    python3 tools/rollback.py --restore --run-id 20260308_124626 --scope source \
+        --source macbook_local
+    python3 tools/rollback.py --restore --run-id 20260308_124626 --scope folder \
+        --folder "/Users/foo/Downloads"
     python3 tools/rollback.py --restore --file-ids 1,2,3
 """
 
-import sqlite3, json, os, re, glob, shutil, subprocess, argparse
-from pathlib import Path
+import argparse
+import glob
+import json
+import logging
+import re
+import shutil
+import sqlite3
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE = Path(__file__).parent.parent
@@ -114,7 +126,7 @@ def _infer_local_source(path: str) -> str:
 
 def _lookup_sizes(paths: list, cloud_ids: list) -> dict:
     """Return {source_path|cloud_id: file_size} from manifest.db (best-effort, batch)."""
-    sizes = {}
+    sizes: Dict[str, int] = {}
     if not MANIFEST_DB.exists():
         return sizes
     try:
@@ -436,21 +448,36 @@ def _restore_onedrive(rec: dict) -> tuple:
         return False, "onedrive_token.json not found — authenticate via cleaner.py first"
     try:
         import requests
+        from tools.api_validators import APIResponseError, validate_restore_response
 
         with open(token_file) as f:
             td = json.load(f)
         token = td.get("access_token")
         if not token:
             return False, "OneDrive access_token missing or expired"
+
         resp = requests.post(
             f"https://graph.microsoft.com/v1.0/me/drive/items/{cid}/restore",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={},
             timeout=30,
         )
-        if resp.status_code in (200, 201, 202, 204):
+
+        # Validate response body — not just HTTP status code
+        try:
+            validated = validate_restore_response(resp, expected_file_id=cid)
+            logger.info("OneDrive restore validated: %s (%s)", cid, validated.get("name", cid))
             return True, f"Restored OneDrive item {cid}"
-        return False, f"HTTP {resp.status_code}: {resp.text[:300]}"
+        except APIResponseError as e:
+            logger.error("Restore validation failed for %s: %s", cid, e.message)
+            return False, f"Restore failed: {e.message}"
+
+    except requests.Timeout:
+        logger.error("Restore request timed out for %s", cid)
+        return False, "Timeout"
+    except (APIResponseError,) as e:
+        logger.error("Restore validation failed for %s: %s", cid, e.message)
+        return False, f"Restore failed: {e.message}"
     except Exception as e:
         return False, str(e)
 
@@ -506,34 +533,51 @@ def restore_files(file_ids: list) -> list:
             continue
         if row["restored"]:
             results.append(
-                {"id": fid, "filename": row["filename"], "source": row["source"], "ok": True, "msg": "Already restored"}
+                {
+                    "id": fid,
+                    "filename": row["filename"],
+                    "source": row["source"],
+                    "ok": True,
+                    "msg": "Already restored",
+                }
             )
             continue
         rec = dict(row)
         ok, msg = _restore_one(rec)
         ts = now_iso()
         if ok:
-            db.execute("UPDATE deleted_files SET restored=1, restored_at=?, restore_error=NULL WHERE id=?", (ts, fid))
+            db.execute(
+                "UPDATE deleted_files SET restored=1, restored_at=?, restore_error=NULL WHERE id=?",
+                (ts, fid),
+            )
         else:
             db.execute("UPDATE deleted_files SET restore_error=? WHERE id=?", (msg, fid))
         db.commit()
-        results.append({"id": fid, "filename": rec["filename"], "source": rec["source"], "ok": ok, "msg": msg})
+        results.append(
+            {"id": fid, "filename": rec["filename"], "source": rec["source"], "ok": ok, "msg": msg}
+        )
     db.close()
     return results
 
 
-def build_restore_ids(run_id: str, scope: str, source: str = None, folder: str = None) -> list:
+def build_restore_ids(
+    run_id: str, scope: str, source: Optional[str] = None, folder: Optional[str] = None
+) -> list:
     """Return list of deleted_files.id matching the given scope."""
     db = get_db()
     if scope == "run":
-        rows = db.execute("SELECT id FROM deleted_files WHERE run_id=? AND restored=0", (run_id,)).fetchall()
+        rows = db.execute(
+            "SELECT id FROM deleted_files WHERE run_id=? AND restored=0", (run_id,)
+        ).fetchall()
     elif scope == "source" and source:
         rows = db.execute(
-            "SELECT id FROM deleted_files WHERE run_id=? AND source=? AND restored=0", (run_id, source)
+            "SELECT id FROM deleted_files WHERE run_id=? AND source=? AND restored=0",
+            (run_id, source),
         ).fetchall()
     elif scope == "folder" and folder:
         rows = db.execute(
-            "SELECT id FROM deleted_files WHERE run_id=? AND parent_folder=? AND restored=0", (run_id, folder)
+            "SELECT id FROM deleted_files WHERE run_id=? AND parent_folder=? AND restored=0",
+            (run_id, folder),
         ).fetchall()
     else:
         rows = []
@@ -557,9 +601,9 @@ def generate_report(run_id: str, results: list) -> str:
   <td style="color:{'#3ecf8e' if r.get('ok') else '#e05c65'};text-align:center;font-size:16px">
     {'&#10003;' if r.get('ok') else '&#10007;'}
   </td>
-  <td style="font-family:monospace;color:#8892a4">{r.get('source','')}</td>
-  <td>{r.get('filename','')}</td>
-  <td style="color:{'#3ecf8e' if r.get('ok') else '#e05c65'};font-size:12px">{r.get('msg','')}</td>
+  <td style="font-family:monospace;color:#8892a4">{r.get('source', '')}</td>
+  <td>{r.get('filename', '')}</td>
+  <td style="color:{'#3ecf8e' if r.get('ok') else '#e05c65'};font-size:12px">{r.get('msg', '')}</td>
 </tr>"""
         for r in results
     )
@@ -570,7 +614,8 @@ def generate_report(run_id: str, results: list) -> str:
 <meta charset="UTF-8">
 <title>Rollback Report — {ts}</title>
 <style>
-  body {{ background:#0f1117; color:#e2e8f0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  body {{ background:#0f1117; color:#e2e8f0;
+          font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
           padding:32px; font-size:14px; line-height:1.6; }}
   h1   {{ color:#5b8dee; font-size:22px; margin-bottom:4px; }}
   h2   {{ color:#8892a4; font-size:13px; font-weight:400; margin-bottom:24px; }}
@@ -619,10 +664,16 @@ if __name__ == "__main__":
         description="StorageRationalizer — Rollback Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--sync", action="store_true", help="Re-parse all cleanup_*.log files into rollback.db")
-    parser.add_argument("--restore", action="store_true", help="Restore files from trash/recycle-bin")
+    parser.add_argument(
+        "--sync", action="store_true", help="Re-parse all cleanup_*.log files into rollback.db"
+    )
+    parser.add_argument(
+        "--restore", action="store_true", help="Restore files from trash/recycle-bin"
+    )
     parser.add_argument("--run-id", help="Cleanup run ID (e.g. 20260308_124626)")
-    parser.add_argument("--scope", choices=["run", "source", "folder", "files"], help="Restore scope")
+    parser.add_argument(
+        "--scope", choices=["run", "source", "folder", "files"], help="Restore scope"
+    )
     parser.add_argument("--source", help="Source filter (scope=source)")
     parser.add_argument("--folder", help="Parent folder filter (scope=folder)")
     parser.add_argument("--file-ids", help="Comma-separated deleted_files.id list (scope=files)")

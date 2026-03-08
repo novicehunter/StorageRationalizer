@@ -20,14 +20,21 @@ Usage:
     python3 verifier.py --dry-run          # show what would be verified, don't update DB
 """
 
-import sqlite3, hashlib, json, argparse, tempfile, os
+import argparse
+import hashlib
+import json
+import logging
+import sqlite3
 import urllib.request
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
+
+logger = logging.getLogger(__name__)
 
 console = Console()
 
@@ -67,7 +74,7 @@ def log(msg):
         f.write(f"[{now_iso()}] {msg}\n")
 
 
-def partial_hash_local(path: str, size: int = PARTIAL_SIZE) -> str | None:
+def partial_hash_local(path: str, size: int = PARTIAL_SIZE) -> Optional[str]:
     """Hash first N bytes of a local file."""
     try:
         h = hashlib.sha256()
@@ -79,7 +86,7 @@ def partial_hash_local(path: str, size: int = PARTIAL_SIZE) -> str | None:
         return None
 
 
-def full_hash_local(path: str) -> str | None:
+def full_hash_local(path: str) -> Optional[str]:
     """Full SHA256 of a local file."""
     try:
         h = hashlib.sha256()
@@ -140,7 +147,9 @@ def get_onedrive_token():
                     return cached.get("access_token")
 
         # Re-auth
-        app = msal.PublicClientApplication(creds["CLIENT_ID"], authority="https://login.microsoftonline.com/consumers")
+        app = msal.PublicClientApplication(
+            creds["CLIENT_ID"], authority="https://login.microsoftonline.com/consumers"
+        )
         accounts = app.get_accounts()
         if accounts:
             result = app.acquire_token_silent(["Files.ReadWrite.All"], account=accounts[0])
@@ -154,7 +163,10 @@ def get_onedrive_token():
             token = result["access_token"]
             with open(token_file, "w") as f:
                 json.dump(
-                    {"access_token": token, "expires_at": datetime.now().timestamp() + result.get("expires_in", 3600)},
+                    {
+                        "access_token": token,
+                        "expires_at": datetime.now().timestamp() + result.get("expires_in", 3600),
+                    },
                     f,
                 )
             return token
@@ -163,7 +175,7 @@ def get_onedrive_token():
     return None
 
 
-def partial_hash_url(url: str, headers: dict, size: int = PARTIAL_SIZE) -> str | None:
+def partial_hash_url(url: str, headers: dict, size: int = PARTIAL_SIZE) -> Optional[str]:
     """Download first N bytes from a URL and hash them."""
     try:
         req = urllib.request.Request(url, headers={**headers, "Range": f"bytes=0-{size-1}"})
@@ -179,7 +191,7 @@ def partial_hash_url(url: str, headers: dict, size: int = PARTIAL_SIZE) -> str |
         return None
 
 
-def get_google_drive_download_url(file_id: str, creds) -> str | None:
+def get_google_drive_download_url(file_id: str, creds) -> Optional[str]:
     try:
         import requests
 
@@ -193,20 +205,25 @@ def get_google_drive_download_url(file_id: str, creds) -> str | None:
         if resp.status_code == 200:
             return resp.url
         # For large files Google returns a download warning page — get direct URL
-        return f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true"
+        return (
+            f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&supportsAllDrives=true"
+        )
     except Exception as e:
         log(f"GDrive URL error {file_id}: {e}")
         return None
 
 
-def partial_hash_gdrive(file_id: str, creds) -> str | None:
+def partial_hash_gdrive(file_id: str, creds) -> Optional[str]:
     """Partial hash a Google Drive file using range request."""
     try:
         import requests
 
         resp = requests.get(
             f"https://www.googleapis.com/drive/v3/files/{file_id}",
-            headers={"Authorization": f"Bearer {creds.token}", "Range": f"bytes=0-{PARTIAL_SIZE-1}"},
+            headers={
+                "Authorization": f"Bearer {creds.token}",
+                "Range": f"bytes=0-{PARTIAL_SIZE-1}",
+            },
             params={"alt": "media", "supportsAllDrives": "true"},
             timeout=30,
         )
@@ -221,31 +238,43 @@ def partial_hash_gdrive(file_id: str, creds) -> str | None:
         return None
 
 
-def partial_hash_onedrive(file_id: str, token: str) -> str | None:
+def partial_hash_onedrive(file_id: str, token: str) -> Optional[str]:
     """Partial hash a OneDrive file using range request."""
     try:
         import requests
+        from tools.api_validators import APIResponseError, validate_metadata_response
 
         # Get download URL first
-        meta = requests.get(
+        meta_resp = requests.get(
             f"https://graph.microsoft.com/v1.0/me/drive/items/{file_id}",
             headers={"Authorization": f"Bearer {token}"},
             params={"select": "id,@microsoft.graph.downloadUrl"},
             timeout=15,
         )
-        if meta.status_code != 200:
-            log(f"OneDrive meta error {file_id}: {meta.status_code}")
+
+        # Validate metadata response — check body, not just HTTP status
+        try:
+            meta = validate_metadata_response(meta_resp, expected_file_id=file_id)
+        except APIResponseError as e:
+            logger.error("OneDrive metadata validation failed for %s: %s", file_id, e.message)
+            log(f"OneDrive meta validation error {file_id}: {e.message}")
             return None
 
-        download_url = meta.json().get("@microsoft.graph.downloadUrl")
+        download_url = meta.get("@microsoft.graph.downloadUrl")
         if not download_url:
             return None
 
-        resp = requests.get(download_url, headers={"Range": f"bytes=0-{PARTIAL_SIZE-1}"}, timeout=30)
+        resp = requests.get(
+            download_url, headers={"Range": f"bytes=0-{PARTIAL_SIZE-1}"}, timeout=30
+        )
         if resp.status_code in (200, 206):
             h = hashlib.sha256()
             h.update(resp.content[:PARTIAL_SIZE])
             return h.hexdigest()
+        return None
+    except requests.Timeout:
+        logger.error("OneDrive metadata request timed out for %s", file_id)
+        log(f"OneDrive meta timeout {file_id}")
         return None
     except Exception as e:
         log(f"OneDrive partial hash error {file_id}: {e}")
@@ -255,13 +284,16 @@ def partial_hash_onedrive(file_id: str, token: str) -> str | None:
 # ── pHash ──────────────────────────────────────────────────────────────────────
 
 
-def phash_local(path: str) -> str | None:
+def phash_local(path: str) -> Optional[str]:
     """Compute perceptual hash of a local image."""
     try:
         from PIL import Image
-        import struct
 
-        img = Image.open(path).convert("L").resize((32, 32), Image.LANCZOS)
+        img = (
+            Image.open(path)
+            .convert("L")
+            .resize((32, 32), Image.LANCZOS)  # type: ignore[attr-defined]
+        )
         pixels = list(img.getdata())
         avg = sum(pixels) / len(pixels)
         bits = "".join("1" if p > avg else "0" for p in pixels)
@@ -291,7 +323,14 @@ PHASH_THRESHOLD = 10  # images with distance < 10 are considered visually identi
 
 
 def verify_group(
-    group_id: str, members: list, mconn, dconn, gcreds, od_token: str, use_phash: bool, dry_run: bool
+    group_id: str,
+    members: list,
+    mconn,
+    dconn,
+    gcreds,
+    od_token: str,
+    use_phash: bool,
+    dry_run: bool,
 ) -> str:
     """
     Verify a duplicate group. Returns:
@@ -307,7 +346,6 @@ def verify_group(
         file_id = m["file_id"]
         cloud_id = m["cloud_file_id"]
         local_path = m["source_path"]
-        filename = m["filename"]
 
         ph = None
 
@@ -361,7 +399,9 @@ def verify_group(
         photo_members = [
             m
             for m in members
-            if Path(m["filename"]).suffix.lower() in PHOTO_EXTS and m["source_path"] and Path(m["source_path"]).exists()
+            if Path(m["filename"]).suffix.lower() in PHOTO_EXTS
+            and m["source_path"]
+            and Path(m["source_path"]).exists()
         ]
         if len(photo_members) >= 2:
             ph1 = phash_local(photo_members[0]["source_path"])
@@ -411,7 +451,9 @@ def main():
     parser.add_argument("--phash", action="store_true", help="Enable perceptual hashing for photos")
     parser.add_argument("--source", help="Verify only one source (e.g. onedrive)")
     parser.add_argument("--dry-run", action="store_true", help="Show results without updating DB")
-    parser.add_argument("--limit", type=int, default=0, help="Limit number of groups to verify (0=all)")
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Limit number of groups to verify (0=all)"
+    )
     args = parser.parse_args()
 
     console.rule("[bold blue]StorageRationalizer — Phase 2b Media Verifier[/bold blue]")
@@ -438,7 +480,9 @@ def main():
     source_filter = f"AND m.source = '{args.source}'" if args.source else ""
     limit_clause = f"LIMIT {args.limit}" if args.limit else ""
 
-    media_ext_list = "'" + "','".join([e.lstrip(".") for e in list(PHOTO_EXTS) + list(VIDEO_EXTS)]) + "'"
+    media_ext_list = (
+        "'" + "','".join([e.lstrip(".") for e in list(PHOTO_EXTS) + list(VIDEO_EXTS)]) + "'"
+    )
 
     groups = dconn.execute(
         f"""
@@ -467,7 +511,9 @@ def main():
 
     sources_needed = set()
     for g in groups:
-        members = dconn.execute("SELECT * FROM duplicate_members WHERE group_id=?", (g["group_id"],)).fetchall()
+        members = dconn.execute(
+            "SELECT * FROM duplicate_members WHERE group_id=?", (g["group_id"],)
+        ).fetchall()
         for m in members:
             sources_needed.add(m["source"])
 
@@ -477,7 +523,9 @@ def main():
         if gcreds:
             console.print("  [green]✓ Google Drive connected[/green]")
         else:
-            console.print("  [yellow]⚠ Google Drive not available — will skip GDrive files[/yellow]")
+            console.print(
+                "  [yellow]⚠ Google Drive not available — will skip GDrive files[/yellow]"
+            )
 
     if "onedrive" in sources_needed:
         console.print("[dim]Connecting to OneDrive...[/dim]")
@@ -499,18 +547,23 @@ def main():
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-
         task = progress.add_task("Verifying media...", total=len(groups))
 
         for i, g in enumerate(groups):
-            progress.update(task, description=f"[cyan]Verifying[/cyan] {g['keep_filename'][:50]}", completed=i)
+            progress.update(
+                task, description=f"[cyan]Verifying[/cyan] {g['keep_filename'][:50]}", completed=i
+            )
 
             # Get all members with manifest data
-            raw_members = dconn.execute("SELECT * FROM duplicate_members WHERE group_id=?", (g["group_id"],)).fetchall()
+            raw_members = dconn.execute(
+                "SELECT * FROM duplicate_members WHERE group_id=?", (g["group_id"],)
+            ).fetchall()
 
             members = []
             for m in raw_members:
-                mf = mconn.execute("SELECT * FROM files WHERE file_id=?", (m["file_id"],)).fetchone()
+                mf = mconn.execute(
+                    "SELECT * FROM files WHERE file_id=?", (m["file_id"],)
+                ).fetchone()
                 if mf:
                     members.append(
                         {
@@ -522,7 +575,9 @@ def main():
                         }
                     )
 
-            result = verify_group(g["group_id"], members, mconn, dconn, gcreds, od_token, args.phash, args.dry_run)
+            result = verify_group(
+                g["group_id"], members, mconn, dconn, gcreds, od_token, args.phash, args.dry_run
+            )
             stats[result] += 1
 
             if (i + 1) % 50 == 0:
@@ -542,11 +597,17 @@ def main():
     table.add_column("Groups", style="white", justify="right")
     table.add_column("Meaning", style="dim")
 
-    table.add_row("✓ Confirmed (→100%)", str(stats["confirmed"]), "Partial hashes match — safe to delete")
-    table.add_row("✗ Rejected  (→40%)", str(stats["rejected"]), "Hashes differ — removed from delete list")
+    table.add_row(
+        "✓ Confirmed (→100%)", str(stats["confirmed"]), "Partial hashes match — safe to delete"
+    )
+    table.add_row(
+        "✗ Rejected  (→40%)", str(stats["rejected"]), "Hashes differ — removed from delete list"
+    )
     table.add_row("~ Skipped", str(stats["skipped"]), "Couldn't download/access to verify")
     if args.phash:
-        table.add_row("≈ pHash match (→95%)", str(stats["phash_match"]), "Visually identical — safe to delete")
+        table.add_row(
+            "≈ pHash match (→95%)", str(stats["phash_match"]), "Visually identical — safe to delete"
+        )
 
     console.print(table)
     console.print()
@@ -563,13 +624,14 @@ def main():
     """
     ).fetchone()
 
-    console.print(f"  [bold]Updated delete list (≥90% confidence):[/bold]")
+    console.print("  [bold]Updated delete list (≥90% confidence):[/bold]")
     console.print(f"    Groups: {row['groups']:,}")
     console.print(f"    Files:  {row['files']:,}")
     console.print(f"    Space:  [green]{format_size(row['wasted'])}[/green]")
     console.print()
     console.print(
-        f"  [dim]Run Phase 2 classifier with --reset to regenerate reports with updated confidence scores.[/dim]"
+        "  [dim]Run Phase 2 classifier with --reset to regenerate reports"
+        " with updated confidence scores.[/dim]"
     )
     console.print()
     console.rule()
