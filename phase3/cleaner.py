@@ -233,28 +233,45 @@ def delete_google_drive(file_id: str, filename: str, dry_run: bool,
         return False
 
 
-def delete_onedrive(file_id: str, filename: str, dry_run: bool,
-                    token: str, log_file) -> bool:
-    """Move OneDrive file to Recycle Bin (recoverable within 30 days)."""
-    if dry_run:
-        log(log_file, f"DRY_RUN onedrive {file_id} {filename}")
-        return True
+ONEDRIVE_BATCH_SIZE = 20  # Graph API $batch max
+
+
+def batch_delete_onedrive(items: list, token: str, log_file) -> dict:
+    """
+    Delete up to 20 OneDrive items in a single Graph API $batch call.
+    items: list of (row_id, file_id, cloud_id, filename)
+    Returns dict of cloud_id -> bool
+    """
+    import requests
+    batch_requests = [
+        {"id": str(i), "method": "DELETE", "url": f"/me/drive/items/{cloud_id}"}
+        for i, (_, _, cloud_id, _) in enumerate(items)
+    ]
     try:
-        import requests
-        resp = requests.delete(
-            f'https://graph.microsoft.com/v1.0/me/drive/items/{file_id}',
-            headers={'Authorization': f'Bearer {token}'},
-            timeout=30
+        resp = requests.post(
+            'https://graph.microsoft.com/v1.0/$batch',
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+            json={"requests": batch_requests},
+            timeout=60
         )
-        if resp.status_code in (204, 200):
-            log(log_file, f"TRASHED onedrive {file_id} {filename}")
-            return True
-        else:
-            log(log_file, f"ERROR onedrive {file_id} {filename}: HTTP {resp.status_code}")
-            return False
+        resp.raise_for_status()
+        responses = resp.json().get('responses', [])
     except Exception as e:
-        log(log_file, f"ERROR onedrive {file_id} {filename}: {e}")
-        return False
+        log(log_file, f"BATCH_ERROR onedrive: {e}")
+        return {cloud_id: False for _, _, cloud_id, _ in items}
+
+    results = {}
+    for r in responses:
+        idx    = int(r['id'])
+        _, _, cloud_id, filename = items[idx]
+        status = r.get('status', 0)
+        if status in (200, 204):
+            log(log_file, f"TRASHED onedrive {cloud_id} {filename}")
+            results[cloud_id] = True
+        else:
+            log(log_file, f"ERROR onedrive {cloud_id} {filename}: HTTP {status}")
+            results[cloud_id] = False
+    return results
 
 
 def delete_icloud_photos(file_id: str, filename: str, dry_run: bool, log_file) -> bool:
@@ -422,22 +439,28 @@ def main():
 
     stats = {'deleted': 0, 'skipped': 0, 'errors': 0}
 
+    # Split rows: OneDrive uses batch API, everything else is single-item
+    onedrive_rows = [r for r in rows if r['source'] == 'onedrive']
+    other_rows    = [r for r in rows if r['source'] != 'onedrive']
+
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
                   BarColumn(), TextColumn("{task.completed}/{task.total}"),
                   TimeElapsedColumn(), console=console) as progress:
 
         task = progress.add_task("Deleting...", total=len(rows))
+        completed = 0
 
-        for i, row in enumerate(rows):
-            source    = row['source']
-            filename  = row['filename']
-            cloud_id  = row['cloud_file_id']
-            local_path= row['source_path']
-            file_id   = row['file_id']
+        # ── Non-OneDrive sources (single-item) ───────────────────────────────
+        for i, row in enumerate(other_rows):
+            source     = row['source']
+            filename   = row['filename']
+            cloud_id   = row['cloud_file_id']
+            local_path = row['source_path']
+            file_id    = row['file_id']
 
             progress.update(task,
                 description=f"[red]Deleting[/red] [{source}] {filename[:50]}",
-                completed=i)
+                completed=completed)
 
             ok = False
 
@@ -450,16 +473,9 @@ def main():
             elif source == 'google_drive':
                 if gcreds and cloud_id:
                     ok = delete_google_drive(cloud_id, filename, False, gcreds, log_file)
-                    time.sleep(0.1)  # rate limit
+                    time.sleep(0.1)  # Google Drive API rate limit
                 else:
                     log(log_file, f"SKIP_NO_AUTH google_drive {filename}")
-
-            elif source == 'onedrive':
-                if od_token and cloud_id:
-                    ok = delete_onedrive(cloud_id, filename, False, od_token, log_file)
-                    time.sleep(0.1)  # rate limit
-                else:
-                    log(log_file, f"SKIP_NO_AUTH onedrive {filename}")
 
             elif source == 'icloud_photos':
                 if cloud_id:
@@ -469,22 +485,54 @@ def main():
 
             if ok:
                 stats['deleted'] += 1
-                # Mark as deleted in duplicates DB
-                dconn.execute(
-                    "UPDATE duplicate_members SET action='deleted' WHERE id=?",
-                    (row['id'],)
-                )
-                # Mark as deleted in manifest
-                mconn.execute(
-                    "UPDATE files SET scan_error='DELETED_PHASE3' WHERE file_id=?",
-                    (file_id,)
-                )
+                dconn.execute("UPDATE duplicate_members SET action='deleted' WHERE id=?", (row['id'],))
+                mconn.execute("UPDATE files SET scan_error='DELETED_PHASE3' WHERE file_id=?", (file_id,))
             else:
                 stats['skipped'] += 1
 
-            if (i + 1) % 100 == 0:
+            completed += 1
+            if completed % 20 == 0:
                 dconn.commit()
                 mconn.commit()
+
+        # ── OneDrive: batched deletes (20 per Graph API $batch call) ─────────
+        for batch_start in range(0, len(onedrive_rows), ONEDRIVE_BATCH_SIZE):
+            batch = onedrive_rows[batch_start:batch_start + ONEDRIVE_BATCH_SIZE]
+
+            progress.update(task,
+                description=f"[red]Deleting[/red] [onedrive] batch {batch_start // ONEDRIVE_BATCH_SIZE + 1} "
+                            f"({batch_start}–{batch_start + len(batch)})",
+                completed=completed)
+
+            if not od_token:
+                for row in batch:
+                    log(log_file, f"SKIP_NO_AUTH onedrive {row['filename']}")
+                    stats['skipped'] += 1
+                completed += len(batch)
+                continue
+
+            items = [
+                (row['id'], row['file_id'], row['cloud_file_id'], row['filename'])
+                for row in batch if row['cloud_file_id']
+            ]
+            no_id = [row for row in batch if not row['cloud_file_id']]
+            for row in no_id:
+                log(log_file, f"SKIP_NO_ID onedrive {row['filename']}")
+                stats['skipped'] += 1
+
+            if items:
+                results = batch_delete_onedrive(items, od_token, log_file)
+                for row_id, file_id, cloud_id, _ in items:
+                    if results.get(cloud_id):
+                        stats['deleted'] += 1
+                        dconn.execute("UPDATE duplicate_members SET action='deleted' WHERE id=?", (row_id,))
+                        mconn.execute("UPDATE files SET scan_error='DELETED_PHASE3' WHERE file_id=?", (file_id,))
+                    else:
+                        stats['skipped'] += 1
+
+            dconn.commit()
+            mconn.commit()
+            completed += len(batch)
 
         progress.update(task, completed=len(rows))
 
