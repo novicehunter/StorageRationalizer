@@ -6,12 +6,15 @@ Open: http://localhost:5000
 Data: saved to tracker_data.db in the same folder
 """
 
-import sqlite3, json, os
+import sqlite3, json, os, glob, re
 from flask import Flask, render_template, request, jsonify, send_file
-from datetime import datetime
+from datetime import datetime, timezone
 
 app = Flask(__name__)
-DB = os.path.join(os.path.dirname(__file__), "tracker_data.db")
+DB       = os.path.join(os.path.dirname(__file__), "tracker_data.db")
+LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs")
+DUPES_DB = os.path.join(os.path.dirname(__file__), "..", "manifests", "duplicates.db")
+TARGET_GB = 143.0
 
 # ── Database setup ────────────────────────────────────────────────────────────
 def get_db():
@@ -134,6 +137,141 @@ def stats():
         total   = db.execute("SELECT COUNT(*) FROM checklist").fetchone()[0]
         checked = db.execute("SELECT COUNT(*) FROM checklist WHERE checked=1").fetchone()[0]
     return jsonify({"total": total, "checked": checked})
+
+@app.route("/api/cleanup_status")
+def cleanup_status():
+    """Parse latest cleanup_*.log and return live stats."""
+    log_files = sorted(glob.glob(os.path.join(LOGS_DIR, "cleanup_*.log")))
+    if not log_files:
+        return jsonify({"error": "No cleanup logs found"})
+
+    latest   = log_files[-1]
+    log_name = os.path.basename(latest)
+
+    try:
+        with open(latest, "r") as f:
+            lines = f.readlines()
+    except OSError as e:
+        return jsonify({"error": str(e)})
+
+    ts_re = re.compile(r"^\[([^\]]+)\]\s+(.*)")
+
+    total_files  = 0
+    deleted      = 0
+    not_found    = 0
+    errors_403   = 0
+    errors_other = 0
+    mode         = "unknown"
+    start_ts     = None
+    end_ts       = None
+    is_complete  = False
+    source_counts = {}   # source -> {deleted, not_found, errors}
+
+    def ensure_src(src):
+        if src not in source_counts:
+            source_counts[src] = {"deleted": 0, "not_found": 0, "errors": 0}
+
+    for raw in lines:
+        m = ts_re.match(raw.strip())
+        if not m:
+            continue
+        ts_str, msg = m.group(1), m.group(2)
+
+        try:
+            ts = datetime.fromisoformat(ts_str)
+        except ValueError:
+            ts = None
+
+        if "=== Phase 3 Cleaner started" in msg:
+            start_ts = ts
+            mm = re.search(r"mode=(\S+)", msg)
+            if mm:
+                mode = mm.group(1)
+            mm = re.search(r"files=(\d+)", msg)
+            if mm:
+                total_files = int(mm.group(1))
+
+        elif "=== Complete" in msg:
+            end_ts      = ts
+            is_complete = True
+
+        elif msg.startswith(("DELETED ", "TRASHED ")):
+            parts = msg.split()
+            src   = parts[1] if len(parts) > 1 else "unknown"
+            ensure_src(src)
+            source_counts[src]["deleted"] += 1
+            deleted += 1
+
+        elif msg.startswith(("SKIP_NOT_FOUND ", "NOT_FOUND ")):
+            parts = msg.split()
+            src   = parts[1] if len(parts) > 1 else "unknown"
+            ensure_src(src)
+            source_counts[src]["not_found"] += 1
+            not_found += 1
+
+        elif msg.startswith("ERROR "):
+            parts = msg.split()
+            src   = parts[1] if len(parts) > 1 else "unknown"
+            ensure_src(src)
+            if "HTTP 403" in msg:
+                source_counts[src]["errors"] += 1
+                errors_403 += 1
+            else:
+                source_counts[src]["errors"] += 1
+                errors_other += 1
+
+    processed   = deleted + not_found + errors_403 + errors_other
+    progress_pct = round((processed / total_files * 100) if total_files > 0 else 0, 1)
+
+    # ETA / duration
+    eta_seconds  = None
+    elapsed_sec  = None
+    if start_ts:
+        now = datetime.now(start_ts.tzinfo or timezone.utc)
+        if end_ts:
+            elapsed_sec = (end_ts - start_ts).total_seconds()
+        elif not is_complete and processed > 0:
+            elapsed_sec = (now - start_ts).total_seconds()
+            rate = processed / elapsed_sec if elapsed_sec > 0 else 0
+            if rate > 0:
+                eta_seconds = (total_files - processed) / rate
+
+    # Space recovered from duplicates.db
+    space_recovered_gb = 0.0
+    try:
+        if os.path.exists(DUPES_DB):
+            conn = sqlite3.connect(DUPES_DB)
+            row  = conn.execute(
+                "SELECT SUM(file_size) FROM duplicate_members WHERE action='deleted'"
+            ).fetchone()
+            conn.close()
+            if row and row[0]:
+                space_recovered_gb = round(row[0] / (1024 ** 3), 2)
+    except Exception:
+        pass
+
+    last_lines = [l.rstrip() for l in lines if l.strip()][-20:]
+
+    return jsonify({
+        "log_file":          log_name,
+        "mode":              mode,
+        "total_files":       total_files,
+        "deleted":           deleted,
+        "not_found":         not_found,
+        "errors_403":        errors_403,
+        "errors_other":      errors_other,
+        "processed":         processed,
+        "progress_pct":      progress_pct,
+        "is_complete":       is_complete,
+        "start_time":        start_ts.isoformat() if start_ts else None,
+        "end_time":          end_ts.isoformat()   if end_ts   else None,
+        "elapsed_sec":       elapsed_sec,
+        "eta_seconds":       eta_seconds,
+        "space_recovered_gb": space_recovered_gb,
+        "target_gb":         TARGET_GB,
+        "source_breakdown":  source_counts,
+        "last_lines":        last_lines,
+    })
 
 if __name__ == "__main__":
     init_db()

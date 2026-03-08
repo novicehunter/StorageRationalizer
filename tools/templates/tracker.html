@@ -115,6 +115,36 @@
   /* Phase mini-progress */
   .phase-mini-bar { height: 3px; background: var(--border); margin-top: 8px; border-radius: 999px; }
   .phase-mini-fill { height: 100%; background: var(--green); border-radius: 999px; transition: width 0.3s; }
+
+  /* ── Tabs ──────────────────────────────────────────────────── */
+  .tab-nav { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+  .tab-btn { padding: 8px 20px; border-radius: 8px 8px 0 0; border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; margin-bottom: -1px; border-bottom: 1px solid var(--border); transition: color 0.15s, background 0.15s; }
+  .tab-btn:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+  .tab-btn.active { background: var(--card); color: var(--text); border-color: var(--border); border-bottom-color: var(--card); }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* ── Cleanup Monitor ────────────────────────────────────────── */
+  .monitor-info { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 16px; margin-bottom: 16px; font-size: 13px; flex-wrap: wrap; }
+  .monitor-sep { color: var(--border); }
+  .monitor-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  @media(max-width:700px){ .monitor-cards { grid-template-columns: repeat(2,1fr); } }
+  .monitor-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .mc-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 6px; }
+  .mc-val { font-size: 28px; font-weight: 700; }
+  .mc-val.green { color: var(--green); }
+  .mc-val.yellow { color: var(--yellow); }
+  .mc-val.red { color: var(--red); }
+  .mc-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .monitor-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .monitor-table th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; padding: 4px 8px 8px; border-bottom: 1px solid var(--border); }
+  .monitor-table td { padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .monitor-table tr:last-child td { border-bottom: none; }
+  .monitor-table td:nth-child(2) { color: var(--green); font-weight: 600; }
+  .monitor-table td:nth-child(3) { color: var(--yellow); }
+  .monitor-table td:nth-child(4) { color: var(--red); }
+  .monitor-log-pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; color: var(--muted); max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -132,6 +162,15 @@
       <input id="import-input" type="file" accept=".json" style="display:none" onchange="importData(event)">
     </div>
   </div>
+
+  <!-- Tab Navigation -->
+  <div class="tab-nav">
+    <button class="tab-btn active" id="tab-btn-tracker" onclick="switchTab('tracker')">Setup Tracker</button>
+    <button class="tab-btn" id="tab-btn-cleanup" onclick="switchTab('cleanup')">&#9685; Cleanup Monitor</button>
+  </div>
+
+  <!-- ═══ Tab: Setup Tracker ═══ -->
+  <div id="tab-tracker" class="tab-pane active">
 
   <!-- Financial Target Banner -->
   <div class="finance-banner">
@@ -553,6 +592,95 @@
     </div>
   </div>
 
+  </div><!-- /tab-tracker -->
+
+  <!-- ═══ Tab: Cleanup Monitor ═══ -->
+  <div id="tab-cleanup" class="tab-pane">
+
+    <!-- Log info bar -->
+    <div class="monitor-info">
+      <span id="monitor-logfile" style="font-family:monospace;color:var(--accent)">—</span>
+      <span class="monitor-sep">·</span>
+      <span>Mode: <strong id="monitor-mode">—</strong></span>
+      <span class="monitor-sep">·</span>
+      <span id="monitor-status-badge" class="status-tag status-pending">—</span>
+      <span style="flex:1"></span>
+      <span id="monitor-refresh-time" style="color:var(--muted);font-size:12px"></span>
+    </div>
+
+    <!-- Stat cards -->
+    <div class="monitor-cards">
+      <div class="monitor-card">
+        <div class="mc-label">Processed</div>
+        <div class="mc-val" id="mc-processed">—</div>
+        <div class="mc-sub" id="mc-total">of — files</div>
+      </div>
+      <div class="monitor-card">
+        <div class="mc-label">Deleted</div>
+        <div class="mc-val green" id="mc-deleted">—</div>
+      </div>
+      <div class="monitor-card">
+        <div class="mc-label">Not Found (404)</div>
+        <div class="mc-val yellow" id="mc-404">—</div>
+      </div>
+      <div class="monitor-card">
+        <div class="mc-label">Errors (403 / other)</div>
+        <div class="mc-val red" id="mc-errors">—</div>
+      </div>
+    </div>
+
+    <!-- Cleanup progress bar -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:600">Cleanup Progress</span>
+        <span id="monitor-eta" style="color:var(--muted);font-size:13px"></span>
+      </div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="monitor-progress-bar" style="width:0%"></div>
+      </div>
+      <div class="progress-text">
+        <span id="monitor-pct">0%</span>
+        <span id="monitor-timing" style="color:var(--muted)"></span>
+      </div>
+    </div>
+
+    <!-- Space recovered vs 143 GB target -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:600">Space Recovered vs 143 GB Target</span>
+        <span id="monitor-space-text" style="color:var(--green);font-weight:700"></span>
+      </div>
+      <div class="progress-bar-wrap" style="height:12px">
+        <div class="progress-bar-fill" id="monitor-space-bar" style="width:0%;background:linear-gradient(90deg,var(--green),var(--purple))"></div>
+      </div>
+      <div class="progress-text">
+        <span id="monitor-space-pct" style="color:var(--muted)">0% of 143 GB recovered</span>
+        <span style="color:var(--muted)">Target: 143 GB</span>
+      </div>
+    </div>
+
+    <!-- Per-source table -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:12px">Per-Source Breakdown</div>
+      <table class="monitor-table">
+        <thead><tr><th>Source</th><th>Deleted</th><th>Not Found</th><th>Errors</th></tr></thead>
+        <tbody id="monitor-source-body">
+          <tr><td colspan="4" style="color:var(--muted);text-align:center;padding:16px">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Last 20 log lines -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-weight:600">Last 20 Log Lines</span>
+        <span style="font-size:11px;color:var(--muted)">auto-scrolling</span>
+      </div>
+      <pre id="monitor-log-lines" class="monitor-log-pre">Loading…</pre>
+    </div>
+
+  </div><!-- /tab-cleanup -->
+
 </div><!-- /container -->
 
 <script>
@@ -667,8 +795,122 @@ async function importData(e) {
   location.reload();
 }
 
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('tab-btn-' + name).classList.add('active');
+  if (name === 'cleanup') fetchCleanupStatus();
+}
+
+// ── Cleanup Monitor ───────────────────────────────────────────────────────────
+let cleanupRefreshTimer = null;
+
+function fmtDuration(sec) {
+  if (sec == null) return '';
+  sec = Math.round(sec);
+  if (sec < 60)  return sec + 's';
+  if (sec < 3600) return Math.floor(sec/60) + 'm ' + (sec%60) + 's';
+  return Math.floor(sec/3600) + 'h ' + Math.floor((sec%3600)/60) + 'm';
+}
+
+function colorLogLine(line) {
+  if (line.includes('DELETED') || line.includes('TRASHED')) return '<span style="color:var(--green)">' + escHtml(line) + '</span>';
+  if (line.includes('SKIP_NOT_FOUND') || line.includes('NOT_FOUND')) return '<span style="color:var(--yellow)">' + escHtml(line) + '</span>';
+  if (line.includes('ERROR') || line.includes('BATCH_ERROR')) return '<span style="color:var(--red)">' + escHtml(line) + '</span>';
+  if (line.includes('=== ')) return '<span style="color:var(--accent)">' + escHtml(line) + '</span>';
+  return escHtml(line);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function fetchCleanupStatus() {
+  try {
+    const res = await fetch('/api/cleanup_status');
+    const d = await res.json();
+    if (d.error) {
+      $('monitor-logfile').textContent = d.error;
+      return;
+    }
+
+    // Info bar
+    $('monitor-logfile').textContent = d.log_file;
+    $('monitor-mode').textContent    = d.mode;
+    const badge = $('monitor-status-badge');
+    if (d.is_complete) {
+      badge.textContent  = 'Complete';
+      badge.className    = 'status-tag status-done';
+    } else {
+      badge.textContent  = 'Running';
+      badge.className    = 'status-tag status-active';
+    }
+    $('monitor-refresh-time').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+    // Stat cards
+    $('mc-processed').textContent = d.processed.toLocaleString();
+    $('mc-total').textContent     = 'of ' + d.total_files.toLocaleString() + ' files';
+    $('mc-deleted').textContent   = d.deleted.toLocaleString();
+    $('mc-404').textContent       = d.not_found.toLocaleString();
+    $('mc-errors').textContent    = (d.errors_403 + d.errors_other).toLocaleString();
+
+    // Progress bar
+    $('monitor-progress-bar').style.width = d.progress_pct + '%';
+    $('monitor-pct').textContent = d.progress_pct + '%  (' + d.processed.toLocaleString() + ' / ' + d.total_files.toLocaleString() + ')';
+    if (d.is_complete && d.elapsed_sec != null) {
+      $('monitor-timing').textContent = 'Duration: ' + fmtDuration(d.elapsed_sec);
+      $('monitor-eta').textContent    = '';
+    } else if (d.eta_seconds != null) {
+      $('monitor-eta').textContent    = 'ETA ~' + fmtDuration(d.eta_seconds);
+      $('monitor-timing').textContent = d.elapsed_sec != null ? 'Elapsed: ' + fmtDuration(d.elapsed_sec) : '';
+    } else {
+      $('monitor-eta').textContent    = '';
+      $('monitor-timing').textContent = '';
+    }
+
+    // Space recovered
+    const spacePct = Math.min((d.space_recovered_gb / d.target_gb) * 100, 100);
+    $('monitor-space-bar').style.width   = spacePct + '%';
+    $('monitor-space-text').textContent  = d.space_recovered_gb.toFixed(2) + ' GB recovered';
+    $('monitor-space-pct').textContent   = spacePct.toFixed(1) + '% of ' + d.target_gb + ' GB target';
+
+    // Per-source table
+    const tbody = $('monitor-source-body');
+    const sources = Object.keys(d.source_breakdown);
+    if (sources.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:12px">No data yet</td></tr>';
+    } else {
+      tbody.innerHTML = sources.sort().map(src => {
+        const s = d.source_breakdown[src];
+        return `<tr><td style="font-family:monospace">${escHtml(src)}</td><td>${s.deleted.toLocaleString()}</td><td>${s.not_found.toLocaleString()}</td><td>${s.errors.toLocaleString()}</td></tr>`;
+      }).join('');
+    }
+
+    // Last 20 log lines (auto-scroll to bottom)
+    const pre = $('monitor-log-lines');
+    pre.innerHTML = d.last_lines.map(colorLogLine).join('\n');
+    pre.scrollTop = pre.scrollHeight;
+
+  } catch (err) {
+    console.error('cleanup_status error:', err);
+  }
+}
+
+// Auto-refresh every 10s only while Cleanup Monitor tab is visible
+function startCleanupRefresh() {
+  if (cleanupRefreshTimer) return;
+  cleanupRefreshTimer = setInterval(() => {
+    if (document.getElementById('tab-cleanup').classList.contains('active')) {
+      fetchCleanupStatus();
+    }
+  }, 10000);
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 loadAll();
+startCleanupRefresh();
 </script>
 </body>
 </html>
