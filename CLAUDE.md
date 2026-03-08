@@ -12,6 +12,8 @@ StorageRationalizer is a storage rationalization tool that consolidates duplicat
 - Never delete from Google Drive — it is the migration target.
 - Always dry-run (`--dry-run`) before executing any cleanup.
 - After every file edit or script run that produces output, commit all changes and push to origin main. Commit format: `phase[N]: [what changed]` (e.g. `phase3: exclude google_drive from cleaner mode all`).
+- **Google Drive has 207 files flagged as duplicates — do NOT delete these yet.** They will be cleaned up in Phase 7/8 when we reorganize Google Drive into the target folder structure.
+- **Phase 3 cleanup runs with `--source onedrive`, `--source macbook_local`, `--source icloud_photos`, `--source icloud_drive` ONLY. Never `--source google_drive`.**
 
 **Permissions — proceed without asking:**
 - Reading any file in the repo
@@ -117,3 +119,37 @@ Place in `credentials/`:
 - Phase 3 never permanently deletes — local files go to macOS Trash, cloud files go to provider recycle bins (30-day recovery window).
 - Files >500MB skip SHA256 hashing during scan.
 - The verifier downloads only the first 10MB (partial hash) to verify 90% confidence media groups before upgrading/downgrading confidence.
+
+## Roadmap
+
+### Phase 7/8 — Google Drive Reorganization
+- Reorganize Google Drive into target folder structure.
+- Clean up the 207 Google Drive files currently flagged as duplicates (held back from Phase 3).
+
+### Phase 9.5 — Metadata Enrichment
+Extend `manifest.db` with additional tables for rich personal intelligence:
+- `tags` table — user-defined and auto-generated tags per file
+- `entities` table — people, places, organizations extracted from file content
+- `topics` table — topic clusters per file
+- `relationships` table — links between files (e.g. email → attachment, photo → album)
+- `embeddings` table — vector embeddings for semantic search
+
+### Phase 10a — Personal Intelligence: Semantic Search + LLM Q&A
+- Build semantic search across all personal data using embeddings from Phase 9.5.
+- LLM Q&A interface: ask natural-language questions answered from your own files.
+
+### Phase 10b — Autonomous Scheduled Agent + Digest Reports
+- Autonomous scheduled agent runs on a cron/timer.
+- Produces digest reports summarizing new files, storage trends, and suggested actions.
+- Agent can flag anomalies, suggest cleanups, and track filing health over time.
+
+## End State Vision
+
+**Device roles:**
+- MacBook and Windows keep active working files only.
+- Google Drive is the master archive — single source of truth for all personal data.
+- All devices mirror the same target folder structure.
+
+**Phone sync:**
+- iPhone Camera Roll → Google Photos auto-backup (primary).
+- iCloud stays at 50GB free tier only — no iCloud Drive expansion.
