@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StorageRationalizer — Tracker</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --border: #2a2d3a;
+    --accent: #5b8dee;
+    --green: #3ecf8e;
+    --yellow: #f6c90e;
+    --red: #e05c65;
+    --purple: #a78bfa;
+    --orange: #fb923c;
+    --text: #e2e8f0;
+    --muted: #8892a4;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; }
+
+  /* Layout */
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+
+  /* Header */
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; gap: 12px; }
+  .header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+  .header h1 span { color: var(--accent); }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .progress-pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 16px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .progress-pill .frac { font-weight: 700; color: var(--green); }
+  .btn { padding: 7px 16px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 13px; cursor: pointer; transition: background 0.15s; }
+  .btn:hover { background: var(--border); }
+  .btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-accent:hover { background: #4a7de0; }
+
+  /* Financial banner */
+  .finance-banner { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .finance-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+  .finance-val { font-size: 20px; font-weight: 700; }
+  .finance-val.current { color: var(--red); }
+  .finance-val.target { color: var(--green); }
+  .finance-arrow { font-size: 24px; color: var(--muted); }
+  .finance-savings { background: rgba(62,207,142,0.1); border: 1px solid rgba(62,207,142,0.3); border-radius: 7px; padding: 6px 14px; margin-left: auto; }
+  .finance-savings .label { color: var(--green); font-size: 12px; font-weight: 600; }
+  .finance-savings .amount { font-size: 18px; font-weight: 700; color: var(--green); }
+
+  /* Overall progress bar */
+  .overall-progress { margin-bottom: 24px; }
+  .progress-bar-wrap { background: var(--border); border-radius: 999px; height: 8px; overflow: hidden; margin-top: 6px; }
+  .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 999px; transition: width 0.4s ease; }
+  .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* Phase cards */
+  .phase { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
+  .phase-header { display: flex; align-items: center; gap: 12px; padding: 14px 18px; cursor: pointer; user-select: none; }
+  .phase-header:hover { background: rgba(255,255,255,0.03); }
+  .phase-badge { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .phase-title { flex: 1; font-weight: 600; font-size: 15px; }
+  .phase-subtitle { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
+  .phase-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .phase-count.done { color: var(--green); }
+  .chevron { color: var(--muted); transition: transform 0.2s; font-size: 12px; }
+  .phase.open .chevron { transform: rotate(180deg); }
+  .phase-body { padding: 0 18px 14px; display: none; }
+  .phase.open .phase-body { display: block; }
+
+  /* Status badge on phase header */
+  .status-tag { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .status-done { background: rgba(62,207,142,0.15); color: var(--green); border: 1px solid rgba(62,207,142,0.3); }
+  .status-active { background: rgba(91,141,238,0.15); color: var(--accent); border: 1px solid rgba(91,141,238,0.3); }
+  .status-pending { background: rgba(136,146,164,0.1); color: var(--muted); border: 1px solid var(--border); }
+  .status-future { background: rgba(167,139,250,0.1); color: var(--purple); border: 1px solid rgba(167,139,250,0.3); }
+
+  /* Checklist items */
+  .checklist { list-style: none; }
+  .checklist li { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .checklist li:last-child { border-bottom: none; }
+  .checklist label { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; width: 100%; }
+  .checklist input[type=checkbox] { accent-color: var(--green); width: 15px; height: 15px; flex-shrink: 0; margin-top: 2px; cursor: pointer; }
+  .checklist .item-text { flex: 1; }
+  .checklist .item-text.checked { color: var(--muted); text-decoration: line-through; }
+  .checklist .item-tag { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; margin-top: 2px; }
+  .tag-local { background: rgba(246,201,14,0.12); color: var(--yellow); border: 1px solid rgba(246,201,14,0.25); }
+  .tag-cloud { background: rgba(91,141,238,0.12); color: var(--accent); border: 1px solid rgba(91,141,238,0.25); }
+  .tag-windows { background: rgba(251,146,60,0.12); color: var(--orange); border: 1px solid rgba(251,146,60,0.25); }
+  .tag-ai { background: rgba(167,139,250,0.12); color: var(--purple); border: 1px solid rgba(167,139,250,0.25); }
+  .tag-manual { background: rgba(224,92,101,0.12); color: var(--red); border: 1px solid rgba(224,92,101,0.25); }
+  .tag-auto { background: rgba(62,207,142,0.12); color: var(--green); border: 1px solid rgba(62,207,142,0.25); }
+
+  /* Sub-sections within a phase */
+  .subsection { margin-top: 10px; }
+  .subsection-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+
+  /* Notes */
+  .note-area { margin-top: 10px; }
+  .note-area label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .note-area textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; padding: 8px 10px; resize: vertical; min-height: 64px; font-family: inherit; }
+  .note-area textarea:focus { outline: none; border-color: var(--accent); }
+
+  /* Color palette for phase badges */
+  .c1 { background: rgba(91,141,238,0.15); color: var(--accent); }
+  .c2 { background: rgba(62,207,142,0.15); color: var(--green); }
+  .c3 { background: rgba(246,201,14,0.15); color: var(--yellow); }
+  .c4 { background: rgba(251,146,60,0.15); color: var(--orange); }
+  .c5 { background: rgba(167,139,250,0.15); color: var(--purple); }
+  .c6 { background: rgba(224,92,101,0.15); color: var(--red); }
+
+  /* Divider */
+  .divider { height: 1px; background: var(--border); margin: 8px 0; }
+
+  /* Phase mini-progress */
+  .phase-mini-bar { height: 3px; background: var(--border); margin-top: 8px; border-radius: 999px; }
+  .phase-mini-fill { height: 100%; background: var(--green); border-radius: 999px; transition: width 0.3s; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>Storage<span>Rationalizer</span> — Tracker</h1>
+    <div class="header-right">
+      <div class="progress-pill">
+        Overall: <span class="frac" id="overall-frac">0 / 0</span>
+      </div>
+      <button class="btn btn-accent" onclick="exportData()">Export JSON</button>
+      <button class="btn" onclick="document.getElementById('import-input').click()">Import</button>
+      <input id="import-input" type="file" accept=".json" style="display:none" onchange="importData(event)">
+    </div>
+  </div>
+
+  <!-- Financial Target Banner -->
+  <div class="finance-banner">
+    <div>
+      <div class="finance-label">Current spend</div>
+      <div class="finance-val current">~$30 / mo</div>
+    </div>
+    <div class="finance-arrow">→</div>
+    <div>
+      <div class="finance-label">Target spend</div>
+      <div class="finance-val target">$10.98 / mo</div>
+    </div>
+    <div class="finance-savings">
+      <div class="label">Monthly savings</div>
+      <div class="amount">~$19 / mo &nbsp;·&nbsp; ~$228 / yr</div>
+    </div>
+  </div>
+
+  <!-- Overall progress bar -->
+  <div class="overall-progress">
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="overall-bar" style="width:0%"></div>
+    </div>
+    <div class="progress-text">
+      <span id="overall-pct">0% complete</span>
+      <span id="overall-remaining">loading…</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       PHASES
+  ════════════════════════════════════════════════════════════ -->
+
+  <!-- Phase 1 -->
+  <div class="phase open" id="phase-1">
+    <div class="phase-header" onclick="togglePhase('phase-1')">
+      <div class="phase-badge c1">P1</div>
+      <div class="phase-title">Scan all sources into manifest.db <span class="phase-subtitle">Phase 1</span></div>
+      <span class="status-tag status-done">Done</span>
+      <span class="phase-count" id="cnt-phase-1"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist" id="cl-phase-1">
+        <li><label><input type="checkbox" data-id="p1-gdrive"> <span class="item-text">Scan Google Drive</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        <li><label><input type="checkbox" data-id="p1-onedrive"> <span class="item-text">Scan OneDrive</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        <li><label><input type="checkbox" data-id="p1-local"> <span class="item-text">Scan MacBook Local</span></label><span class="item-tag tag-local">local</span></li>
+        <li><label><input type="checkbox" data-id="p1-icloud-drive"> <span class="item-text">Scan iCloud Drive</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        <li><label><input type="checkbox" data-id="p1-icloud-photos"> <span class="item-text">Scan iCloud Photos (osxphotos)</span></label><span class="item-tag tag-local">local</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-1"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-1" placeholder="Phase 1 notes…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 2 -->
+  <div class="phase" id="phase-2">
+    <div class="phase-header" onclick="togglePhase('phase-2')">
+      <div class="phase-badge c2">P2</div>
+      <div class="phase-title">Classify duplicates → duplicates.db <span class="phase-subtitle">Phase 2 + 2b</span></div>
+      <span class="status-tag status-done">Done</span>
+      <span class="phase-count" id="cnt-phase-2"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist" id="cl-phase-2">
+        <li><label><input type="checkbox" data-id="p2-classify"> <span class="item-text">Run classifier.py — build duplicate_groups + duplicate_members</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p2-verify"> <span class="item-text">Run verifier.py (Phase 2b) — partial-hash confirm 90% media groups</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p2-review"> <span class="item-text">Review reports/ output — sanity-check keep/delete assignments</span></label><span class="item-tag tag-manual">manual</span></li>
+        <li><label><input type="checkbox" data-id="p2-audit"> <span class="item-text">Run verify_cleanup.py — audit TRASHED entries vs duplicates.db</span></label><span class="item-tag tag-auto">auto</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-2"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-2" placeholder="Phase 2 notes…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 3 -->
+  <div class="phase" id="phase-3">
+    <div class="phase-header" onclick="togglePhase('phase-3')">
+      <div class="phase-badge c3">P3</div>
+      <div class="phase-title">Delete confirmed duplicates per source <span class="phase-subtitle">Phase 3</span></div>
+      <span class="status-tag status-active">Active</span>
+      <span class="phase-count" id="cnt-phase-3"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+
+      <div class="subsection">
+        <div class="subsection-title">Preflight</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p3-dryrun-all"> <span class="item-text">Dry-run all sources — review what would be deleted</span></label><span class="item-tag tag-manual">manual</span></li>
+        </ul>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">OneDrive cleanup (cloud API batch deletes)</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p3-od-dryrun"> <span class="item-text">Dry-run OneDrive: <code>--dry-run --source onedrive</code></span></label><span class="item-tag tag-auto">auto</span></li>
+          <li><label><input type="checkbox" data-id="p3-od-safe"> <span class="item-text">Execute safe mode (100% exact-hash): <code>--mode safe --source onedrive</code></span></label><span class="item-tag tag-cloud">cloud</span></li>
+          <li><label><input type="checkbox" data-id="p3-od-docs"> <span class="item-text">Execute docs mode (90%+ non-media): <code>--mode docs --source onedrive</code></span></label><span class="item-tag tag-cloud">cloud</span></li>
+          <li><label><input type="checkbox" data-id="p3-od-all"> <span class="item-text">Execute all mode (verified media): <code>--mode all --source onedrive</code></span></label><span class="item-tag tag-cloud">cloud</span></li>
+          <li><label><input type="checkbox" data-id="p3-od-verify"> <span class="item-text">Verify OneDrive recycle bin — spot-check 10 deletions</span></label><span class="item-tag tag-manual">manual</span></li>
+        </ul>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">MacBook Local cleanup (→ macOS Trash)</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p3-local-dryrun"> <span class="item-text">Dry-run local: <code>--dry-run --source macbook_local</code></span></label><span class="item-tag tag-auto">auto</span></li>
+          <li><label><input type="checkbox" data-id="p3-local-safe"> <span class="item-text">Execute safe mode: <code>--mode safe --source macbook_local</code></span></label><span class="item-tag tag-local">local</span></li>
+          <li><label><input type="checkbox" data-id="p3-local-docs"> <span class="item-text">Execute docs mode: <code>--mode docs --source macbook_local</code></span></label><span class="item-tag tag-local">local</span></li>
+          <li><label><input type="checkbox" data-id="p3-local-all"> <span class="item-text">Execute all mode: <code>--mode all --source macbook_local</code></span></label><span class="item-tag tag-local">local</span></li>
+          <li><label><input type="checkbox" data-id="p3-local-empty-trash"> <span class="item-text">Review macOS Trash — empty after confirming</span></label><span class="item-tag tag-manual">manual</span></li>
+        </ul>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">iCloud Drive cleanup (→ iCloud recycle)</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p3-icd-dryrun"> <span class="item-text">Dry-run iCloud Drive: <code>--dry-run --source icloud_drive</code></span></label><span class="item-tag tag-auto">auto</span></li>
+          <li><label><input type="checkbox" data-id="p3-icd-safe"> <span class="item-text">Execute safe mode: <code>--mode safe --source icloud_drive</code></span></label><span class="item-tag tag-cloud">cloud</span></li>
+          <li><label><input type="checkbox" data-id="p3-icd-all"> <span class="item-text">Execute all mode: <code>--mode all --source icloud_drive</code></span></label><span class="item-tag tag-cloud">cloud</span></li>
+        </ul>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">iCloud Photos cleanup</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p3-icp-dryrun"> <span class="item-text">Dry-run iCloud Photos: <code>--dry-run --source icloud_photos</code></span></label><span class="item-tag tag-auto">auto</span></li>
+          <li><label><input type="checkbox" data-id="p3-icp-execute"> <span class="item-text">Execute iCloud Photos deletions (verified media only, confidence=100)</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        </ul>
+      </div>
+
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-3"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-3" placeholder="Phase 3 notes — counts deleted, errors, etc…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 4 -->
+  <div class="phase" id="phase-4">
+    <div class="phase-header" onclick="togglePhase('phase-4')">
+      <div class="phase-badge c4">P4</div>
+      <div class="phase-title">Google Photos Takeout + Amazon Photos (Windows) <span class="phase-subtitle">Phase 4</span></div>
+      <span class="status-tag status-pending">Pending</span>
+      <span class="phase-count" id="cnt-phase-4"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+
+      <div class="subsection">
+        <div class="subsection-title">Google Photos Takeout</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p4-takeout-request"> <span class="item-text">Request Google Takeout export (Photos only, max chunk size)</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p4-takeout-download"> <span class="item-text">Download all Takeout zips to external drive / Windows machine</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p4-takeout-unzip"> <span class="item-text">Unzip and flatten folder structure — merge sidecar JSON metadata</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p4-takeout-scan"> <span class="item-text">Scan Takeout folder into manifest.db as source <code>google_photos_takeout</code></span></label><span class="item-tag tag-auto">auto</span></li>
+          <li><label><input type="checkbox" data-id="p4-takeout-dupes"> <span class="item-text">Identify duplicates vs iCloud Photos / OneDrive already scanned</span></label><span class="item-tag tag-auto">auto</span></li>
+        </ul>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Amazon Photos (Windows)</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p4-amz-install"> <span class="item-text">Install Amazon Photos desktop app on Windows — full sync</span></label><span class="item-tag tag-windows">windows</span></li>
+          <li><label><input type="checkbox" data-id="p4-amz-download"> <span class="item-text">Download all Amazon Photos to local Windows folder</span></label><span class="item-tag tag-windows">windows</span></li>
+          <li><label><input type="checkbox" data-id="p4-amz-copy"> <span class="item-text">Copy Amazon Photos folder to shared storage / external drive</span></label><span class="item-tag tag-windows">windows</span></li>
+          <li><label><input type="checkbox" data-id="p4-amz-scan"> <span class="item-text">Scan Amazon Photos into manifest.db as source <code>amazon_photos</code></span></label><span class="item-tag tag-auto">auto</span></li>
+          <li><label><input type="checkbox" data-id="p4-amz-classify"> <span class="item-text">Run classifier.py — find Amazon Photos duplicates</span></label><span class="item-tag tag-auto">auto</span></li>
+          <li><label><input type="checkbox" data-id="p4-amz-delete"> <span class="item-text">Delete confirmed Amazon Photos duplicates (originals kept in Google Photos)</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        </ul>
+      </div>
+
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-4"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-4" placeholder="Phase 4 notes — Takeout size, Amazon count, etc…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 5 -->
+  <div class="phase" id="phase-5">
+    <div class="phase-header" onclick="togglePhase('phase-5')">
+      <div class="phase-badge c5">P5</div>
+      <div class="phase-title">Re-scan and re-classify all sources <span class="phase-subtitle">Phase 5</span></div>
+      <span class="status-tag status-pending">Pending</span>
+      <span class="phase-count" id="cnt-phase-5"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist">
+        <li><label><input type="checkbox" data-id="p5-reset"> <span class="item-text">Reset manifest.db: <code>scanner.py --reset</code></span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p5-scan-all"> <span class="item-text">Full rescan of all sources (including new: google_photos_takeout, amazon_photos)</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p5-classify"> <span class="item-text">Run classifier.py — full re-classify with updated source list</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p5-verify"> <span class="item-text">Run verifier.py — re-verify all 90% media groups</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p5-review"> <span class="item-text">Review updated reports/ — validate keep/delete assignments post-cleanup</span></label><span class="item-tag tag-manual">manual</span></li>
+        <li><label><input type="checkbox" data-id="p5-stats"> <span class="item-text">Document new file counts and wasted_size totals</span></label><span class="item-tag tag-manual">manual</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-5"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-5" placeholder="Phase 5 notes — counts before/after, surprises…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 6 -->
+  <div class="phase" id="phase-6">
+    <div class="phase-header" onclick="togglePhase('phase-6')">
+      <div class="phase-badge c6">P6</div>
+      <div class="phase-title">Media cleanup — final duplicate removal <span class="phase-subtitle">Phase 6</span></div>
+      <span class="status-tag status-pending">Pending</span>
+      <span class="phase-count" id="cnt-phase-6"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist">
+        <li><label><input type="checkbox" data-id="p6-dryrun"> <span class="item-text">Dry-run media cleanup across all remaining sources</span></label><span class="item-tag tag-manual">manual</span></li>
+        <li><label><input type="checkbox" data-id="p6-phash"> <span class="item-text">Run pHash visual dedup pass on photos (near-duplicates, bursts)</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p6-video"> <span class="item-text">Identify video duplicates (same content, different resolution/format)</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p6-delete-onedrive"> <span class="item-text">Delete media dupes from OneDrive (keep Google Drive/Photos copy)</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        <li><label><input type="checkbox" data-id="p6-delete-icloud"> <span class="item-text">Delete media dupes from iCloud Photos (keep Google Photos copy)</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        <li><label><input type="checkbox" data-id="p6-delete-amz"> <span class="item-text">Delete media dupes from Amazon Photos (keep Google Photos copy)</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        <li><label><input type="checkbox" data-id="p6-verify-counts"> <span class="item-text">Verify file counts in Google Photos match expected total</span></label><span class="item-tag tag-manual">manual</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-6"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-6" placeholder="Phase 6 notes — media counts, pHash sensitivity used…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 7 -->
+  <div class="phase" id="phase-7">
+    <div class="phase-header" onclick="togglePhase('phase-7')">
+      <div class="phase-badge c1">P7</div>
+      <div class="phase-title">Folder restructure <span class="phase-subtitle">Google Drive + MacBook + Windows</span></div>
+      <span class="status-tag status-pending">Pending</span>
+      <span class="phase-count" id="cnt-phase-7"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+
+      <div class="subsection">
+        <div class="subsection-title">Google Drive</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p7-gd-schema"> <span class="item-text">Design target folder schema (e.g. /Docs, /Media, /Archive, /Projects)</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p7-gd-move"> <span class="item-text">Move files into target schema via Drive API or rclone</span></label><span class="item-tag tag-cloud">cloud</span></li>
+          <li><label><input type="checkbox" data-id="p7-gd-verify"> <span class="item-text">Verify no orphaned files remain at root</span></label><span class="item-tag tag-manual">manual</span></li>
+        </ul>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">MacBook Local</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p7-mb-schema"> <span class="item-text">Define local folder schema under ~/Documents, ~/Pictures, ~/Projects</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p7-mb-move"> <span class="item-text">Move/organize local files into schema</span></label><span class="item-tag tag-local">local</span></li>
+          <li><label><input type="checkbox" data-id="p7-mb-desktop"> <span class="item-text">Clear Desktop — archive or delete stale files</span></label><span class="item-tag tag-local">local</span></li>
+          <li><label><input type="checkbox" data-id="p7-mb-downloads"> <span class="item-text">Clear Downloads folder — archive or delete</span></label><span class="item-tag tag-local">local</span></li>
+        </ul>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Windows</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p7-win-schema"> <span class="item-text">Define Windows folder schema (Documents, Pictures, Projects)</span></label><span class="item-tag tag-windows">windows</span></li>
+          <li><label><input type="checkbox" data-id="p7-win-move"> <span class="item-text">Move/organize Windows files into schema</span></label><span class="item-tag tag-windows">windows</span></li>
+          <li><label><input type="checkbox" data-id="p7-win-onedrive-disable"> <span class="item-text">Disable OneDrive auto-backup on Windows (migrating to Google Drive)</span></label><span class="item-tag tag-windows">windows</span></li>
+        </ul>
+      </div>
+
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-7"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-7" placeholder="Phase 7 notes — folder schema decisions…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 8a -->
+  <div class="phase" id="phase-8a">
+    <div class="phase-header" onclick="togglePhase('phase-8a')">
+      <div class="phase-badge c2">8a</div>
+      <div class="phase-title">Migrate documents to Google Drive <span class="phase-subtitle">Phase 8a</span></div>
+      <span class="status-tag status-pending">Pending</span>
+      <span class="phase-count" id="cnt-phase-8a"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist">
+        <li><label><input type="checkbox" data-id="p8a-inventory"> <span class="item-text">Inventory docs remaining on MacBook Local and OneDrive post-cleanup</span></label><span class="item-tag tag-manual">manual</span></li>
+        <li><label><input type="checkbox" data-id="p8a-rclone-setup"> <span class="item-text">Set up rclone for Google Drive upload (or Drive for Desktop)</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p8a-upload-local"> <span class="item-text">Upload MacBook Local docs → Google Drive target schema</span></label><span class="item-tag tag-local">local</span></li>
+        <li><label><input type="checkbox" data-id="p8a-upload-win"> <span class="item-text">Upload Windows docs → Google Drive target schema</span></label><span class="item-tag tag-windows">windows</span></li>
+        <li><label><input type="checkbox" data-id="p8a-verify-gdrive"> <span class="item-text">Verify uploads complete and accessible in Google Drive</span></label><span class="item-tag tag-manual">manual</span></li>
+        <li><label><input type="checkbox" data-id="p8a-remove-local"> <span class="item-text">Remove local doc copies confirmed uploaded (after 30-day grace period)</span></label><span class="item-tag tag-local">local</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-8a"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-8a" placeholder="Phase 8a notes — upload counts, rclone config…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 8b -->
+  <div class="phase" id="phase-8b">
+    <div class="phase-header" onclick="togglePhase('phase-8b')">
+      <div class="phase-badge c3">8b</div>
+      <div class="phase-title">Migrate photos to Google Photos <span class="phase-subtitle">Phase 8b</span></div>
+      <span class="status-tag status-pending">Pending</span>
+      <span class="phase-count" id="cnt-phase-8b"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist">
+        <li><label><input type="checkbox" data-id="p8b-inventory"> <span class="item-text">Inventory all unique photos/videos not yet in Google Photos</span></label><span class="item-tag tag-manual">manual</span></li>
+        <li><label><input type="checkbox" data-id="p8b-upload-icloud"> <span class="item-text">Upload iCloud Photos → Google Photos (preserve EXIF dates)</span></label><span class="item-tag tag-cloud">cloud</span></li>
+        <li><label><input type="checkbox" data-id="p8b-upload-local-media"> <span class="item-text">Upload MacBook local media → Google Photos</span></label><span class="item-tag tag-local">local</span></li>
+        <li><label><input type="checkbox" data-id="p8b-upload-win-media"> <span class="item-text">Upload Windows local media → Google Photos</span></label><span class="item-tag tag-windows">windows</span></li>
+        <li><label><input type="checkbox" data-id="p8b-verify-count"> <span class="item-text">Verify Google Photos count matches expected (cross-check with Takeout manifest)</span></label><span class="item-tag tag-manual">manual</span></li>
+        <li><label><input type="checkbox" data-id="p8b-albums"> <span class="item-text">Recreate key albums / Memories in Google Photos</span></label><span class="item-tag tag-manual">manual</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-8b"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-8b" placeholder="Phase 8b notes — photo counts, upload tool used…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 9 -->
+  <div class="phase" id="phase-9">
+    <div class="phase-header" onclick="togglePhase('phase-9')">
+      <div class="phase-badge c4">P9</div>
+      <div class="phase-title">Cancel services and reconfigure phone sync <span class="phase-subtitle">Phase 9</span></div>
+      <span class="status-tag status-pending">Pending</span>
+      <span class="phase-count" id="cnt-phase-9"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+
+      <div class="subsection">
+        <div class="subsection-title">Cancel / downgrade services</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p9-cancel-icloud"> <span class="item-text">Cancel iCloud+ / downgrade to free 5GB (after migration complete)</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p9-cancel-onedrive"> <span class="item-text">Cancel OneDrive 100GB / Microsoft 365 personal (after migration complete)</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p9-cancel-amazon"> <span class="item-text">Cancel Amazon Photos unlimited (if separate plan, after migration)</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p9-confirm-savings"> <span class="item-text">Confirm monthly bill reduced to ≤$10.98/mo target</span></label><span class="item-tag tag-manual">manual</span></li>
+        </ul>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Phone sync reconfiguration</div>
+        <ul class="checklist">
+          <li><label><input type="checkbox" data-id="p9-phone-gdrive"> <span class="item-text">Enable Google Photos auto-backup on iPhone (replace iCloud Photos)</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p9-phone-gdocs"> <span class="item-text">Install Google Drive app on iPhone — enable Docs/Files sync</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p9-phone-disable-icloud-photos"> <span class="item-text">Disable iCloud Photos on iPhone (keep iCloud backup for device settings)</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p9-phone-disable-icloud-drive"> <span class="item-text">Disable iCloud Drive sync for Documents and Desktop</span></label><span class="item-tag tag-manual">manual</span></li>
+          <li><label><input type="checkbox" data-id="p9-win-gdrive-sync"> <span class="item-text">Install Drive for Desktop on Windows — replace OneDrive sync</span></label><span class="item-tag tag-windows">windows</span></li>
+        </ul>
+      </div>
+
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-9"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-9" placeholder="Phase 9 notes — cancellation dates, confirmation numbers…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 9.5 -->
+  <div class="phase" id="phase-9-5">
+    <div class="phase-header" onclick="togglePhase('phase-9-5')">
+      <div class="phase-badge c5">9.5</div>
+      <div class="phase-title">Metadata enrichment layer <span class="phase-subtitle">Phase 9.5</span></div>
+      <span class="status-tag status-future">Future</span>
+      <span class="phase-count" id="cnt-phase-9-5"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist">
+        <li><label><input type="checkbox" data-id="p95-exif-normalize"> <span class="item-text">Normalize EXIF dates across all migrated media (fill missing DateTimeOriginal)</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p95-geo-tag"> <span class="item-text">Geo-tag photos missing location (batch GPS enrichment from sidecar JSON)</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p95-face-tag"> <span class="item-text">Run face-recognition pass — tag people in Google Photos</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p95-doc-ocr"> <span class="item-text">OCR scanned documents → searchable PDFs (stored in Google Drive)</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p95-doc-classify"> <span class="item-text">Auto-classify documents by type (receipts, contracts, IDs) using LLM</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p95-manifest-enrich"> <span class="item-text">Enrich manifest.db with tags, descriptions, OCR text for search index</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p95-verify-coverage"> <span class="item-text">Verify metadata coverage — % files with date, location, tags</span></label><span class="item-tag tag-manual">manual</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-9-5"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-9-5" placeholder="Phase 9.5 notes — tools used, coverage stats…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 10a -->
+  <div class="phase" id="phase-10a">
+    <div class="phase-header" onclick="togglePhase('phase-10a')">
+      <div class="phase-badge c6">10a</div>
+      <div class="phase-title">Personal intelligence — LLM semantic search <span class="phase-subtitle">Phase 10a</span></div>
+      <span class="status-tag status-future">Future</span>
+      <span class="phase-count" id="cnt-phase-10a"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist">
+        <li><label><input type="checkbox" data-id="p10a-embed-docs"> <span class="item-text">Generate embeddings for all documents (text chunks via Claude / OpenAI)</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p10a-embed-photos"> <span class="item-text">Generate CLIP embeddings for all photos (semantic image search)</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p10a-vector-db"> <span class="item-text">Set up local vector DB (e.g. ChromaDB / SQLite-vec) for embeddings</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p10a-search-ui"> <span class="item-text">Build semantic search UI — query by natural language, get files back</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p10a-qa"> <span class="item-text">Add Q&A over personal docs — "find my passport number", "last tax return"</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p10a-timeline"> <span class="item-text">Build personal timeline view — photos + docs by date on a visual map</span></label><span class="item-tag tag-ai">AI</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-10a"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-10a" placeholder="Phase 10a notes — embedding model, vector DB choice…"></textarea></div>
+    </div>
+  </div>
+
+  <!-- Phase 10b -->
+  <div class="phase" id="phase-10b">
+    <div class="phase-header" onclick="togglePhase('phase-10b')">
+      <div class="phase-badge c1">10b</div>
+      <div class="phase-title">Autonomous storage agent <span class="phase-subtitle">Phase 10b</span></div>
+      <span class="status-tag status-future">Future</span>
+      <span class="phase-count" id="cnt-phase-10b"></span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="phase-body">
+      <ul class="checklist">
+        <li><label><input type="checkbox" data-id="p10b-monitor"> <span class="item-text">Continuous scan daemon — detect new duplicates as files arrive</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p10b-policy"> <span class="item-text">Define policy rules — auto-archive, auto-delete, retention by type</span></label><span class="item-tag tag-manual">manual</span></li>
+        <li><label><input type="checkbox" data-id="p10b-agent"> <span class="item-text">Build Claude-powered agent — interprets policy, proposes actions, awaits approval</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p10b-webhook"> <span class="item-text">Webhook / notification on new duplicate detected — Slack / email alert</span></label><span class="item-tag tag-auto">auto</span></li>
+        <li><label><input type="checkbox" data-id="p10b-dashboard"> <span class="item-text">Live dashboard — storage usage, savings to date, new arrivals, pending actions</span></label><span class="item-tag tag-ai">AI</span></li>
+        <li><label><input type="checkbox" data-id="p10b-monthly-report"> <span class="item-text">Monthly digest — what was cleaned, what's growing, cost trend vs $10.98 target</span></label><span class="item-tag tag-ai">AI</span></li>
+      </ul>
+      <div class="phase-mini-bar"><div class="phase-mini-fill" id="bar-phase-10b"></div></div>
+      <div class="note-area"><label>Notes</label><textarea data-section="phase-10b" placeholder="Phase 10b notes — agent framework, policy config…"></textarea></div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+let saveTimer = {};
+
+function debounce(fn, key, ms=800) {
+  clearTimeout(saveTimer[key]);
+  saveTimer[key] = setTimeout(fn, ms);
+}
+
+async function post(url, body) {
+  await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+}
+
+// ── Toggle phase open/close ───────────────────────────────────────────────────
+function togglePhase(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+
+// ── Load all saved data ───────────────────────────────────────────────────────
+async function loadAll() {
+  const res = await fetch('/api/load');
+  const data = await res.json();
+
+  // Restore checkboxes
+  document.querySelectorAll('input[type=checkbox][data-id]').forEach(cb => {
+    const id = cb.dataset.id;
+    if (data.checks[id]) { cb.checked = true; markText(cb); }
+  });
+
+  // Restore notes
+  document.querySelectorAll('textarea[data-section]').forEach(ta => {
+    const sec = ta.dataset.section;
+    if (data.notes[sec]) ta.value = data.notes[sec];
+  });
+
+  updateAllCounts();
+}
+
+// ── Checkbox persistence ──────────────────────────────────────────────────────
+function markText(cb) {
+  const span = cb.closest('label').querySelector('.item-text');
+  if (span) span.classList.toggle('checked', cb.checked);
+}
+
+document.addEventListener('change', async e => {
+  if (e.target.type !== 'checkbox' || !e.target.dataset.id) return;
+  markText(e.target);
+  await post('/api/check', { item_id: e.target.dataset.id, checked: e.target.checked });
+  updateAllCounts();
+});
+
+// ── Textarea persistence ──────────────────────────────────────────────────────
+document.addEventListener('input', e => {
+  if (e.target.tagName !== 'TEXTAREA' || !e.target.dataset.section) return;
+  const sec = e.target.dataset.section;
+  debounce(() => post('/api/note', { section: sec, content: e.target.value }), sec);
+});
+
+// ── Progress counters ─────────────────────────────────────────────────────────
+const PHASES = ['phase-1','phase-2','phase-3','phase-4','phase-5','phase-6',
+                'phase-7','phase-8a','phase-8b','phase-9','phase-9-5','phase-10a','phase-10b'];
+
+function getPhaseCheckboxes(phaseId) {
+  const el = document.getElementById(phaseId);
+  return el ? [...el.querySelectorAll('input[type=checkbox][data-id]')] : [];
+}
+
+function updatePhaseCount(phaseId) {
+  const cbs = getPhaseCheckboxes(phaseId);
+  const done = cbs.filter(c => c.checked).length;
+  const total = cbs.length;
+  const el = $('cnt-' + phaseId);
+  if (!el) return;
+  el.textContent = `${done} / ${total}`;
+  el.className = 'phase-count' + (done === total && total > 0 ? ' done' : '');
+
+  const bar = $('bar-' + phaseId);
+  if (bar) bar.style.width = total ? `${(done/total)*100}%` : '0%';
+}
+
+function updateAllCounts() {
+  let totalDone = 0, totalAll = 0;
+  PHASES.forEach(id => {
+    updatePhaseCount(id);
+    const cbs = getPhaseCheckboxes(id);
+    totalDone += cbs.filter(c => c.checked).length;
+    totalAll  += cbs.length;
+  });
+
+  // Overall
+  $('overall-frac').textContent = `${totalDone} / ${totalAll}`;
+  const pct = totalAll ? Math.round((totalDone/totalAll)*100) : 0;
+  $('overall-bar').style.width = pct + '%';
+  $('overall-pct').textContent = `${pct}% complete`;
+  $('overall-remaining').textContent = `${totalAll - totalDone} tasks remaining`;
+}
+
+// ── Export / Import ───────────────────────────────────────────────────────────
+async function exportData() {
+  window.location.href = '/api/export';
+}
+
+async function importData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const data = JSON.parse(text);
+  await post('/api/import', data);
+  location.reload();
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+loadAll();
+</script>
+</body>
+</html>
