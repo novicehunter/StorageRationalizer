@@ -1,6 +1,8 @@
 # Credentials & secrets
 credentials/*.json
 credentials/*.token
+credentials/*.txt
+credentials/encrypted/
 *.token
 client_secret*.json
 
