@@ -234,43 +234,84 @@ def delete_google_drive(file_id: str, filename: str, dry_run: bool,
 
 
 ONEDRIVE_BATCH_SIZE = 20  # Graph API $batch max
+MAX_RETRIES      = 5
+DEFAULT_BACKOFF  = 10  # seconds if no Retry-After header
 
 
 def batch_delete_onedrive(items: list, token: str, log_file) -> dict:
     """
     Delete up to 20 OneDrive items in a single Graph API $batch call.
+    Retries 429-throttled items with Retry-After backoff (up to MAX_RETRIES).
     items: list of (row_id, file_id, cloud_id, filename)
     Returns dict of cloud_id -> bool
     """
-    import requests
-    batch_requests = [
-        {"id": str(i), "method": "DELETE", "url": f"/me/drive/items/{cloud_id}"}
-        for i, (_, _, cloud_id, _) in enumerate(items)
-    ]
-    try:
-        resp = requests.post(
-            'https://graph.microsoft.com/v1.0/$batch',
-            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
-            json={"requests": batch_requests},
-            timeout=60
-        )
-        resp.raise_for_status()
-        responses = resp.json().get('responses', [])
-    except Exception as e:
-        log(log_file, f"BATCH_ERROR onedrive: {e}")
-        return {cloud_id: False for _, _, cloud_id, _ in items}
+    import requests as _requests
+    import time as _time
 
     results = {}
-    for r in responses:
-        idx    = int(r['id'])
-        _, _, cloud_id, filename = items[idx]
-        status = r.get('status', 0)
-        if status in (200, 204):
-            log(log_file, f"TRASHED onedrive {cloud_id} {filename}")
-            results[cloud_id] = True
+    pending = list(items)
+
+    for attempt in range(MAX_RETRIES):
+        if not pending:
+            break
+
+        batch_requests = [
+            {"id": str(i), "method": "DELETE", "url": f"/me/drive/items/{cloud_id}"}
+            for i, (_, _, cloud_id, _) in enumerate(pending)
+        ]
+        try:
+            resp = _requests.post(
+                'https://graph.microsoft.com/v1.0/$batch',
+                headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+                json={"requests": batch_requests},
+                timeout=60
+            )
+            # Top-level 429 — whole batch throttled
+            if resp.status_code == 429:
+                wait = int(resp.headers.get('Retry-After', DEFAULT_BACKOFF))
+                log(log_file, f"BATCH_429 top-level — waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                _time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            responses = resp.json().get('responses', [])
+        except Exception as e:
+            log(log_file, f"BATCH_ERROR onedrive: {e}")
+            for _, _, cloud_id, _ in pending:
+                results[cloud_id] = False
+            return results
+
+        retry_items = []
+        max_wait    = 0
+
+        for r in responses:
+            idx = int(r['id'])
+            row_id, file_id, cloud_id, filename = pending[idx]
+            status = r.get('status', 0)
+            if status in (200, 204):
+                log(log_file, f"TRASHED onedrive {cloud_id} {filename}")
+                results[cloud_id] = True
+            elif status == 429:
+                # Per-item 429 — queue for retry
+                wait = int(r.get('headers', {}).get('Retry-After', DEFAULT_BACKOFF))
+                max_wait = max(max_wait, wait)
+                retry_items.append((row_id, file_id, cloud_id, filename))
+            else:
+                log(log_file, f"ERROR onedrive {cloud_id} {filename}: HTTP {status}")
+                results[cloud_id] = False
+
+        if retry_items:
+            log(log_file, f"BATCH_429 {len(retry_items)} items throttled — waiting {max_wait}s (attempt {attempt + 1}/{MAX_RETRIES})")
+            _time.sleep(max_wait)
+            pending = retry_items
         else:
-            log(log_file, f"ERROR onedrive {cloud_id} {filename}: HTTP {status}")
+            break
+
+    # Anything still pending after all retries = give up
+    for _, _, cloud_id, filename in pending:
+        if cloud_id not in results:
+            log(log_file, f"ERROR onedrive {cloud_id} {filename}: max retries exceeded")
             results[cloud_id] = False
+
     return results
 
 
