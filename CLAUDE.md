@@ -11,6 +11,7 @@ StorageRationalizer is a storage rationalization tool that consolidates duplicat
 **Rules:**
 - Never delete from Google Drive — it is the migration target.
 - Always dry-run (`--dry-run`) before executing any cleanup.
+- After every file edit or script run that produces output, commit all changes and push to origin main. Commit format: `phase[N]: [what changed]` (e.g. `phase3: exclude google_drive from cleaner mode all`).
 
 ## Commands
 
