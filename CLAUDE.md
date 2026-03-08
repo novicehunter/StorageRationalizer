@@ -13,6 +13,19 @@ StorageRationalizer is a storage rationalization tool that consolidates duplicat
 - Always dry-run (`--dry-run`) before executing any cleanup.
 - After every file edit or script run that produces output, commit all changes and push to origin main. Commit format: `phase[N]: [what changed]` (e.g. `phase3: exclude google_drive from cleaner mode all`).
 
+**Permissions — proceed without asking:**
+- Reading any file in the repo
+- Running Python scripts (`python3 phase*/...`, `tools/...`)
+- Checking logs (`logs/`, `tail`, `grep` on log files)
+- Querying SQLite databases (`manifest.db`, `duplicates.db`)
+- `git status`, `git diff`, `git add`, `git commit`, `git push`
+
+**Permissions — always ask first:**
+- Deleting local files or directories
+- API calls that modify cloud data (OneDrive delete, Google Drive trash, iCloud Photos delete)
+- Installing packages (`pip install`, `brew install`)
+- `git push --force` or any destructive git operation
+
 ## Commands
 
 ```bash
