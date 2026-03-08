@@ -34,25 +34,25 @@ from rich.table import Table
 console = Console()
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-BASE         = Path.home() / "Desktop" / "StorageRationalizer"
-MANIFEST_DB  = BASE / "manifests" / "manifest.db"
-DUPES_DB     = BASE / "manifests" / "duplicates.db"
-REPORTS_DIR  = BASE / "reports"
+BASE = Path.home() / "Desktop" / "StorageRationalizer"
+MANIFEST_DB = BASE / "manifests" / "manifest.db"
+DUPES_DB = BASE / "manifests" / "duplicates.db"
+REPORTS_DIR = BASE / "reports"
 
 # Keep priority — lower number = higher priority = keep this copy
 SOURCE_PRIORITY = {
-    'google_drive':   1,
-    'onedrive':       2,
-    'macbook_local':  3,
-    'icloud_drive':   4,
-    'icloud_photos':  5,
+    "google_drive": 1,
+    "onedrive": 2,
+    "macbook_local": 3,
+    "icloud_drive": 4,
+    "icloud_photos": 5,
 }
 
 # Confidence levels
-CONF_EXACT    = 100  # same hash — guaranteed duplicate
-CONF_HIGH     =  90  # same filename + size + date — almost certainly same file
-CONF_MEDIUM   =  70  # same filename + size — likely same file
-CONF_LOW      =  50  # same filename only — possible duplicate, needs review
+CONF_EXACT = 100  # same hash — guaranteed duplicate
+CONF_HIGH = 90  # same filename + size + date — almost certainly same file
+CONF_MEDIUM = 70  # same filename + size — likely same file
+CONF_LOW = 50  # same filename only — possible duplicate, needs review
 
 MIN_FILE_SIZE = 1024  # ignore files under 1KB
 
@@ -70,7 +70,8 @@ def init_dupes_db(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS duplicate_groups (
             group_id        TEXT PRIMARY KEY,
             match_type      TEXT NOT NULL,
@@ -83,8 +84,10 @@ def init_dupes_db(path: Path) -> sqlite3.Connection:
             keep_filename   TEXT,
             created_at      TEXT
         )
-    """)
-    conn.execute("""
+    """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS duplicate_members (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id        TEXT NOT NULL,
@@ -99,7 +102,8 @@ def init_dupes_db(path: Path) -> sqlite3.Connection:
             match_key       TEXT,
             FOREIGN KEY (group_id) REFERENCES duplicate_groups(group_id)
         )
-    """)
+    """
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_group   ON duplicate_members(group_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_action  ON duplicate_members(action)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_source  ON duplicate_members(source)")
@@ -111,28 +115,38 @@ def init_dupes_db(path: Path) -> sqlite3.Connection:
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
+
 def format_size(b):
-    if not b: return '0 B'
+    if not b:
+        return "0 B"
     b = int(b)
-    for u in ['B','KB','MB','GB','TB']:
-        if b < 1024: return f"{b:.1f} {u}"
+    for u in ["B", "KB", "MB", "GB", "TB"]:
+        if b < 1024:
+            return f"{b:.1f} {u}"
         b /= 1024
     return f"{b:.1f} PB"
 
+
 def pick_keeper(members: list) -> dict:
     """Pick the best copy to keep based on source priority."""
-    return min(members, key=lambda m: (
-        SOURCE_PRIORITY.get(m['source'], 99),
-        # tiebreak: prefer larger file (higher quality)
-        -(m['file_size'] or 0)
-    ))
+    return min(
+        members,
+        key=lambda m: (
+            SOURCE_PRIORITY.get(m["source"], 99),
+            # tiebreak: prefer larger file (higher quality)
+            -(m["file_size"] or 0),
+        ),
+    )
+
 
 def make_group_id(match_type: str, key: str) -> str:
     import hashlib
+
     return hashlib.md5(f"{match_type}:{key}".encode()).hexdigest()
 
 
 # ── Dedup Methods ──────────────────────────────────────────────────────────────
+
 
 def find_exact_hash_dupes(mconn, dconn, sources, progress, task) -> int:
     """Method 1: Same hash across different sources — 100% confidence."""
@@ -142,7 +156,8 @@ def find_exact_hash_dupes(mconn, dconn, sources, progress, task) -> int:
     source_filter = "','".join(sources)
 
     # SHA256 duplicates
-    for row in mconn.execute(f"""
+    for row in mconn.execute(
+        f"""
         SELECT sha256_hash, COUNT(*) c, GROUP_CONCAT(file_id) ids
         FROM files
         WHERE sha256_hash IS NOT NULL
@@ -150,9 +165,10 @@ def find_exact_hash_dupes(mconn, dconn, sources, progress, task) -> int:
           AND file_size >= {MIN_FILE_SIZE}
         GROUP BY sha256_hash
         HAVING COUNT(DISTINCT source) > 1
-    """):
+    """
+    ):
         members = []
-        for fid in row['ids'].split(','):
+        for fid in row["ids"].split(","):
             f = mconn.execute("SELECT * FROM files WHERE file_id=?", (fid,)).fetchone()
             if f:
                 members.append(dict(f))
@@ -161,33 +177,58 @@ def find_exact_hash_dupes(mconn, dconn, sources, progress, task) -> int:
             continue
 
         keeper = pick_keeper(members)
-        group_id = make_group_id('sha256', row['sha256_hash'])
-        total_size = sum(m['file_size'] or 0 for m in members)
-        wasted = total_size - (keeper['file_size'] or 0)
+        group_id = make_group_id("sha256", row["sha256_hash"])
+        total_size = sum(m["file_size"] or 0 for m in members)
+        wasted = total_size - (keeper["file_size"] or 0)
 
-        dconn.execute("""
+        dconn.execute(
+            """
             INSERT OR REPLACE INTO duplicate_groups
             (group_id, match_type, confidence, file_count, total_size, wasted_size,
              keep_file_id, keep_source, keep_filename, created_at)
             VALUES (?,?,?,?,?,?,?,?,?,?)
-        """, (group_id, 'exact_hash', CONF_EXACT, len(members),
-              total_size, wasted, keeper['file_id'],
-              keeper['source'], keeper['filename'], now_iso()))
+        """,
+            (
+                group_id,
+                "exact_hash",
+                CONF_EXACT,
+                len(members),
+                total_size,
+                wasted,
+                keeper["file_id"],
+                keeper["source"],
+                keeper["filename"],
+                now_iso(),
+            ),
+        )
 
         for m in members:
-            action = 'keep' if m['file_id'] == keeper['file_id'] else 'delete'
-            dconn.execute("""
+            action = "keep" if m["file_id"] == keeper["file_id"] else "delete"
+            dconn.execute(
+                """
                 INSERT OR REPLACE INTO duplicate_members
                 (group_id, file_id, source, filename, file_size,
                  source_path, cloud_file_id, action, confidence, match_key)
                 VALUES (?,?,?,?,?,?,?,?,?,?)
-            """, (group_id, m['file_id'], m['source'], m['filename'],
-                  m['file_size'], m['source_path'], m['cloud_file_id'],
-                  action, CONF_EXACT, row['sha256_hash']))
+            """,
+                (
+                    group_id,
+                    m["file_id"],
+                    m["source"],
+                    m["filename"],
+                    m["file_size"],
+                    m["source_path"],
+                    m["cloud_file_id"],
+                    action,
+                    CONF_EXACT,
+                    row["sha256_hash"],
+                ),
+            )
         count += 1
 
     # MD5 duplicates (cloud files)
-    for row in mconn.execute(f"""
+    for row in mconn.execute(
+        f"""
         SELECT md5_hash, COUNT(*) c, GROUP_CONCAT(file_id) ids
         FROM files
         WHERE md5_hash IS NOT NULL
@@ -195,9 +236,10 @@ def find_exact_hash_dupes(mconn, dconn, sources, progress, task) -> int:
           AND file_size >= {MIN_FILE_SIZE}
         GROUP BY md5_hash
         HAVING COUNT(DISTINCT source) > 1
-    """):
+    """
+    ):
         members = []
-        for fid in row['ids'].split(','):
+        for fid in row["ids"].split(","):
             f = mconn.execute("SELECT * FROM files WHERE file_id=?", (fid,)).fetchone()
             if f:
                 members.append(dict(f))
@@ -205,29 +247,53 @@ def find_exact_hash_dupes(mconn, dconn, sources, progress, task) -> int:
             continue
 
         keeper = pick_keeper(members)
-        group_id = make_group_id('md5', row['md5_hash'])
-        total_size = sum(m['file_size'] or 0 for m in members)
-        wasted = total_size - (keeper['file_size'] or 0)
+        group_id = make_group_id("md5", row["md5_hash"])
+        total_size = sum(m["file_size"] or 0 for m in members)
+        wasted = total_size - (keeper["file_size"] or 0)
 
-        dconn.execute("""
+        dconn.execute(
+            """
             INSERT OR REPLACE INTO duplicate_groups
             (group_id, match_type, confidence, file_count, total_size, wasted_size,
              keep_file_id, keep_source, keep_filename, created_at)
             VALUES (?,?,?,?,?,?,?,?,?,?)
-        """, (group_id, 'exact_hash', CONF_EXACT, len(members),
-              total_size, wasted, keeper['file_id'],
-              keeper['source'], keeper['filename'], now_iso()))
+        """,
+            (
+                group_id,
+                "exact_hash",
+                CONF_EXACT,
+                len(members),
+                total_size,
+                wasted,
+                keeper["file_id"],
+                keeper["source"],
+                keeper["filename"],
+                now_iso(),
+            ),
+        )
 
         for m in members:
-            action = 'keep' if m['file_id'] == keeper['file_id'] else 'delete'
-            dconn.execute("""
+            action = "keep" if m["file_id"] == keeper["file_id"] else "delete"
+            dconn.execute(
+                """
                 INSERT OR REPLACE INTO duplicate_members
                 (group_id, file_id, source, filename, file_size,
                  source_path, cloud_file_id, action, confidence, match_key)
                 VALUES (?,?,?,?,?,?,?,?,?,?)
-            """, (group_id, m['file_id'], m['source'], m['filename'],
-                  m['file_size'], m['source_path'], m['cloud_file_id'],
-                  action, CONF_EXACT, row['md5_hash']))
+            """,
+                (
+                    group_id,
+                    m["file_id"],
+                    m["source"],
+                    m["filename"],
+                    m["file_size"],
+                    m["source_path"],
+                    m["cloud_file_id"],
+                    action,
+                    CONF_EXACT,
+                    row["md5_hash"],
+                ),
+            )
         count += 1
 
     dconn.commit()
@@ -241,7 +307,8 @@ def find_same_source_dupes(mconn, dconn, sources, progress, task) -> int:
 
     source_filter = "','".join(sources)
 
-    for row in mconn.execute(f"""
+    for row in mconn.execute(
+        f"""
         SELECT source, filename, file_size, COUNT(*) c, GROUP_CONCAT(file_id) ids
         FROM files
         WHERE source IN ('{source_filter}')
@@ -249,9 +316,10 @@ def find_same_source_dupes(mconn, dconn, sources, progress, task) -> int:
           AND filename NOT IN ('', '.DS_Store')
         GROUP BY source, filename, file_size
         HAVING c > 1
-    """):
+    """
+    ):
         members = []
-        for fid in row['ids'].split(','):
+        for fid in row["ids"].split(","):
             f = mconn.execute("SELECT * FROM files WHERE file_id=?", (fid,)).fetchone()
             if f:
                 members.append(dict(f))
@@ -259,35 +327,58 @@ def find_same_source_dupes(mconn, dconn, sources, progress, task) -> int:
             continue
 
         # Skip if already caught by hash dedup
-        group_id = make_group_id('internal', f"{row['source']}:{row['filename']}:{row['file_size']}")
+        group_id = make_group_id("internal", f"{row['source']}:{row['filename']}:{row['file_size']}")
         existing = dconn.execute("SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)).fetchone()
         if existing:
             continue
 
         keeper = pick_keeper(members)
-        total_size = sum(m['file_size'] or 0 for m in members)
-        wasted = total_size - (keeper['file_size'] or 0)
+        total_size = sum(m["file_size"] or 0 for m in members)
+        wasted = total_size - (keeper["file_size"] or 0)
 
-        dconn.execute("""
+        dconn.execute(
+            """
             INSERT OR REPLACE INTO duplicate_groups
             (group_id, match_type, confidence, file_count, total_size, wasted_size,
              keep_file_id, keep_source, keep_filename, created_at)
             VALUES (?,?,?,?,?,?,?,?,?,?)
-        """, (group_id, 'internal_dupe', CONF_HIGH, len(members),
-              total_size, wasted, keeper['file_id'],
-              keeper['source'], keeper['filename'], now_iso()))
+        """,
+            (
+                group_id,
+                "internal_dupe",
+                CONF_HIGH,
+                len(members),
+                total_size,
+                wasted,
+                keeper["file_id"],
+                keeper["source"],
+                keeper["filename"],
+                now_iso(),
+            ),
+        )
 
         for m in members:
-            action = 'keep' if m['file_id'] == keeper['file_id'] else 'delete'
-            dconn.execute("""
+            action = "keep" if m["file_id"] == keeper["file_id"] else "delete"
+            dconn.execute(
+                """
                 INSERT OR REPLACE INTO duplicate_members
                 (group_id, file_id, source, filename, file_size,
                  source_path, cloud_file_id, action, confidence, match_key)
                 VALUES (?,?,?,?,?,?,?,?,?,?)
-            """, (group_id, m['file_id'], m['source'], m['filename'],
-                  m['file_size'], m['source_path'], m['cloud_file_id'],
-                  action, CONF_HIGH,
-                  f"{row['filename']}:{row['file_size']}"))
+            """,
+                (
+                    group_id,
+                    m["file_id"],
+                    m["source"],
+                    m["filename"],
+                    m["file_size"],
+                    m["source_path"],
+                    m["cloud_file_id"],
+                    action,
+                    CONF_HIGH,
+                    f"{row['filename']}:{row['file_size']}",
+                ),
+            )
         count += 1
 
     dconn.commit()
@@ -301,7 +392,8 @@ def find_cross_source_dupes(mconn, dconn, sources, progress, task) -> int:
 
     source_filter = "','".join(sources)
 
-    for row in mconn.execute(f"""
+    for row in mconn.execute(
+        f"""
         SELECT filename, file_size, COUNT(*) c,
                COUNT(DISTINCT source) src_count,
                GROUP_CONCAT(file_id) ids
@@ -311,48 +403,74 @@ def find_cross_source_dupes(mconn, dconn, sources, progress, task) -> int:
           AND filename NOT IN ('', '.DS_Store')
         GROUP BY filename, file_size
         HAVING src_count > 1
-    """):
+    """
+    ):
         members = []
-        for fid in row['ids'].split(','):
+        for fid in row["ids"].split(","):
             f = mconn.execute("SELECT * FROM files WHERE file_id=?", (fid,)).fetchone()
             if f:
                 members.append(dict(f))
         if len(members) < 2:
             continue
 
-        group_id = make_group_id('cross', f"{row['filename']}:{row['file_size']}")
+        group_id = make_group_id("cross", f"{row['filename']}:{row['file_size']}")
         existing = dconn.execute("SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)).fetchone()
         if existing:
             continue
 
         # Confidence based on whether dates also match
-        dates = set(m.get('exif_date') or m.get('created_at','') for m in members if m.get('exif_date') or m.get('created_at'))
+        dates = set(
+            m.get("exif_date") or m.get("created_at", "") for m in members if m.get("exif_date") or m.get("created_at")
+        )
         confidence = CONF_HIGH if len(dates) <= 1 else CONF_MEDIUM
 
         keeper = pick_keeper(members)
-        total_size = sum(m['file_size'] or 0 for m in members)
-        wasted = total_size - (keeper['file_size'] or 0)
+        total_size = sum(m["file_size"] or 0 for m in members)
+        wasted = total_size - (keeper["file_size"] or 0)
 
-        dconn.execute("""
+        dconn.execute(
+            """
             INSERT OR REPLACE INTO duplicate_groups
             (group_id, match_type, confidence, file_count, total_size, wasted_size,
              keep_file_id, keep_source, keep_filename, created_at)
             VALUES (?,?,?,?,?,?,?,?,?,?)
-        """, (group_id, 'cross_source', confidence, len(members),
-              total_size, wasted, keeper['file_id'],
-              keeper['source'], keeper['filename'], now_iso()))
+        """,
+            (
+                group_id,
+                "cross_source",
+                confidence,
+                len(members),
+                total_size,
+                wasted,
+                keeper["file_id"],
+                keeper["source"],
+                keeper["filename"],
+                now_iso(),
+            ),
+        )
 
         for m in members:
-            action = 'keep' if m['file_id'] == keeper['file_id'] else 'delete'
-            dconn.execute("""
+            action = "keep" if m["file_id"] == keeper["file_id"] else "delete"
+            dconn.execute(
+                """
                 INSERT OR REPLACE INTO duplicate_members
                 (group_id, file_id, source, filename, file_size,
                  source_path, cloud_file_id, action, confidence, match_key)
                 VALUES (?,?,?,?,?,?,?,?,?,?)
-            """, (group_id, m['file_id'], m['source'], m['filename'],
-                  m['file_size'], m['source_path'], m['cloud_file_id'],
-                  action, confidence,
-                  f"{row['filename']}:{row['file_size']}"))
+            """,
+                (
+                    group_id,
+                    m["file_id"],
+                    m["source"],
+                    m["filename"],
+                    m["file_size"],
+                    m["source_path"],
+                    m["cloud_file_id"],
+                    action,
+                    confidence,
+                    f"{row['filename']}:{row['file_size']}",
+                ),
+            )
         count += 1
 
     dconn.commit()
@@ -366,7 +484,8 @@ def find_folder_dupes(mconn, dconn, sources, progress, task) -> int:
 
     source_filter = "','".join(sources)
 
-    for row in mconn.execute(f"""
+    for row in mconn.execute(
+        f"""
         SELECT filename, file_size, COUNT(*) c, GROUP_CONCAT(file_id) ids
         FROM files
         WHERE source IN ('{source_filter}')
@@ -376,44 +495,68 @@ def find_folder_dupes(mconn, dconn, sources, progress, task) -> int:
                OR file_ext IN ('.zip','.rar','.7z','.tar','.gz'))
         GROUP BY filename, file_size
         HAVING c > 1
-    """):
+    """
+    ):
         members = []
-        for fid in row['ids'].split(','):
+        for fid in row["ids"].split(","):
             f = mconn.execute("SELECT * FROM files WHERE file_id=?", (fid,)).fetchone()
             if f:
                 members.append(dict(f))
         if len(members) < 2:
             continue
 
-        group_id = make_group_id('archive', f"{row['filename']}:{row['file_size']}")
+        group_id = make_group_id("archive", f"{row['filename']}:{row['file_size']}")
         existing = dconn.execute("SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)).fetchone()
         if existing:
             continue
 
         keeper = pick_keeper(members)
-        total_size = sum(m['file_size'] or 0 for m in members)
-        wasted = total_size - (keeper['file_size'] or 0)
+        total_size = sum(m["file_size"] or 0 for m in members)
+        wasted = total_size - (keeper["file_size"] or 0)
 
-        dconn.execute("""
+        dconn.execute(
+            """
             INSERT OR REPLACE INTO duplicate_groups
             (group_id, match_type, confidence, file_count, total_size, wasted_size,
              keep_file_id, keep_source, keep_filename, created_at)
             VALUES (?,?,?,?,?,?,?,?,?,?)
-        """, (group_id, 'duplicate_archive', CONF_EXACT, len(members),
-              total_size, wasted, keeper['file_id'],
-              keeper['source'], keeper['filename'], now_iso()))
+        """,
+            (
+                group_id,
+                "duplicate_archive",
+                CONF_EXACT,
+                len(members),
+                total_size,
+                wasted,
+                keeper["file_id"],
+                keeper["source"],
+                keeper["filename"],
+                now_iso(),
+            ),
+        )
 
         for m in members:
-            action = 'keep' if m['file_id'] == keeper['file_id'] else 'delete'
-            dconn.execute("""
+            action = "keep" if m["file_id"] == keeper["file_id"] else "delete"
+            dconn.execute(
+                """
                 INSERT OR REPLACE INTO duplicate_members
                 (group_id, file_id, source, filename, file_size,
                  source_path, cloud_file_id, action, confidence, match_key)
                 VALUES (?,?,?,?,?,?,?,?,?,?)
-            """, (group_id, m['file_id'], m['source'], m['filename'],
-                  m['file_size'], m['source_path'], m['cloud_file_id'],
-                  action, CONF_EXACT,
-                  f"{row['filename']}:{row['file_size']}"))
+            """,
+                (
+                    group_id,
+                    m["file_id"],
+                    m["source"],
+                    m["filename"],
+                    m["file_size"],
+                    m["source_path"],
+                    m["cloud_file_id"],
+                    action,
+                    CONF_EXACT,
+                    f"{row['filename']}:{row['file_size']}",
+                ),
+            )
         count += 1
 
     dconn.commit()
@@ -422,33 +565,54 @@ def find_folder_dupes(mconn, dconn, sources, progress, task) -> int:
 
 # ── Reports ────────────────────────────────────────────────────────────────────
 
+
 def write_csv(dconn, min_confidence: int):
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = REPORTS_DIR / "safe_to_delete.csv"
 
-    with open(csv_path, 'w', newline='') as f:
+    with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            'group_id','match_type','confidence','action',
-            'source','filename','file_size_bytes','file_size_human',
-            'source_path','cloud_file_id','match_key'
-        ])
-        for row in dconn.execute("""
+        writer.writerow(
+            [
+                "group_id",
+                "match_type",
+                "confidence",
+                "action",
+                "source",
+                "filename",
+                "file_size_bytes",
+                "file_size_human",
+                "source_path",
+                "cloud_file_id",
+                "match_key",
+            ]
+        )
+        for row in dconn.execute(
+            """
             SELECT m.*, g.match_type, g.confidence
             FROM duplicate_members m
             JOIN duplicate_groups g ON m.group_id = g.group_id
             WHERE m.action = 'delete'
               AND g.confidence >= ?
             ORDER BY g.confidence DESC, g.wasted_size DESC
-        """, (min_confidence,)):
-            writer.writerow([
-                row['group_id'], row['match_type'], row['confidence'],
-                row['action'], row['source'], row['filename'],
-                row['file_size'] or 0,
-                format_size(row['file_size']),
-                row['source_path'] or '', row['cloud_file_id'] or '',
-                row['match_key'] or ''
-            ])
+        """,
+            (min_confidence,),
+        ):
+            writer.writerow(
+                [
+                    row["group_id"],
+                    row["match_type"],
+                    row["confidence"],
+                    row["action"],
+                    row["source"],
+                    row["filename"],
+                    row["file_size"] or 0,
+                    format_size(row["file_size"]),
+                    row["source_path"] or "",
+                    row["cloud_file_id"] or "",
+                    row["match_key"] or "",
+                ]
+            )
     return csv_path
 
 
@@ -464,14 +628,16 @@ def write_savings_summary(dconn, mconn):
     lines.append("")
 
     # Overall stats
-    row = dconn.execute("""
+    row = dconn.execute(
+        """
         SELECT COUNT(DISTINCT g.group_id) groups,
                SUM(CASE WHEN m.action='delete' THEN 1 ELSE 0 END) to_delete,
                SUM(CASE WHEN m.action='delete' THEN m.file_size ELSE 0 END) wasted
         FROM duplicate_members m
         JOIN duplicate_groups g ON m.group_id = g.group_id
         WHERE g.confidence >= 70
-    """).fetchone()
+    """
+    ).fetchone()
     lines.append(f"Duplicate groups found:  {row['groups']:,}")
     lines.append(f"Files to delete:         {row['to_delete']:,}")
     lines.append(f"Space recoverable:       {format_size(row['wasted'])}")
@@ -479,22 +645,30 @@ def write_savings_summary(dconn, mconn):
 
     # By confidence level
     lines.append("── By Confidence Level ──")
-    for conf, label in [(100,'Exact match (100%)'), (90,'High confidence (90%)'),
-                        (70,'Medium confidence (70%)'), (50,'Low confidence (50%)')]:
-        row = dconn.execute("""
+    for conf, label in [
+        (100, "Exact match (100%)"),
+        (90, "High confidence (90%)"),
+        (70, "Medium confidence (70%)"),
+        (50, "Low confidence (50%)"),
+    ]:
+        row = dconn.execute(
+            """
             SELECT COUNT(*) c,
                    SUM(m.file_size) sz
             FROM duplicate_members m
             JOIN duplicate_groups g ON m.group_id = g.group_id
             WHERE g.confidence = ? AND m.action = 'delete'
-        """, (conf,)).fetchone()
-        if row['c']:
+        """,
+            (conf,),
+        ).fetchone()
+        if row["c"]:
             lines.append(f"  {label}: {row['c']:,} files — {format_size(row['sz'])}")
     lines.append("")
 
     # By source — how much can be deleted from each
     lines.append("── Space Recoverable by Source ──")
-    for row in dconn.execute("""
+    for row in dconn.execute(
+        """
         SELECT m.source,
                COUNT(*) files,
                SUM(m.file_size) sz
@@ -503,26 +677,29 @@ def write_savings_summary(dconn, mconn):
         WHERE m.action = 'delete' AND g.confidence >= 70
         GROUP BY m.source
         ORDER BY sz DESC
-    """):
+    """
+    ):
         lines.append(f"  {row['source']:<20} {row['files']:>6,} files   {format_size(row['sz'])}")
     lines.append("")
 
     # By match type
     lines.append("── By Match Type ──")
-    for row in dconn.execute("""
+    for row in dconn.execute(
+        """
         SELECT match_type, COUNT(DISTINCT group_id) groups,
                SUM(wasted_size) wasted
         FROM duplicate_groups
         WHERE confidence >= 70
         GROUP BY match_type
         ORDER BY wasted DESC
-    """):
+    """
+    ):
         lines.append(f"  {row['match_type']:<25} {row['groups']:>5,} groups   {format_size(row['wasted'])} recoverable")
     lines.append("")
     lines.append("=" * 60)
 
-    with open(txt_path, 'w') as f:
-        f.write('\n'.join(lines))
+    with open(txt_path, "w") as f:
+        f.write("\n".join(lines))
     return txt_path
 
 
@@ -531,18 +708,22 @@ def write_html_report(dconn, mconn, min_confidence: int):
     html_path = REPORTS_DIR / "duplicate_report.html"
 
     # Get summary stats
-    stats = dconn.execute("""
+    stats = dconn.execute(
+        """
         SELECT COUNT(DISTINCT g.group_id) groups,
                SUM(CASE WHEN m.action='delete' THEN 1 ELSE 0 END) to_delete,
                SUM(CASE WHEN m.action='delete' THEN m.file_size ELSE 0 END) wasted
         FROM duplicate_members m
         JOIN duplicate_groups g ON m.group_id = g.group_id
         WHERE g.confidence >= ?
-    """, (min_confidence,)).fetchone()
+    """,
+        (min_confidence,),
+    ).fetchone()
 
     # Get top duplicate groups
-    groups = dconn.execute("""
-        SELECT g.*, 
+    groups = dconn.execute(
+        """
+        SELECT g.*,
                COUNT(m.id) member_count
         FROM duplicate_groups g
         JOIN duplicate_members m ON g.group_id = m.group_id
@@ -550,10 +731,13 @@ def write_html_report(dconn, mconn, min_confidence: int):
         GROUP BY g.group_id
         ORDER BY g.wasted_size DESC
         LIMIT 500
-    """, (min_confidence,)).fetchall()
+    """,
+        (min_confidence,),
+    ).fetchall()
 
     # Source breakdown
-    source_rows = dconn.execute("""
+    source_rows = dconn.execute(
+        """
         SELECT m.source,
                COUNT(*) files,
                SUM(m.file_size) sz
@@ -562,7 +746,9 @@ def write_html_report(dconn, mconn, min_confidence: int):
         WHERE m.action = 'delete' AND g.confidence >= ?
         GROUP BY m.source
         ORDER BY sz DESC
-    """, (min_confidence,)).fetchall()
+    """,
+        (min_confidence,),
+    ).fetchall()
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -642,9 +828,9 @@ def write_html_report(dconn, mconn, min_confidence: int):
   <div class="section">
     <h2>Space Recoverable by Source</h2>"""
 
-    max_sz = max((r['sz'] or 0 for r in source_rows), default=1)
+    max_sz = max((r["sz"] or 0 for r in source_rows), default=1)
     for r in source_rows:
-        sz = r['sz'] or 0
+        sz = r["sz"] or 0
         pct = int(sz / max_sz * 100) if max_sz else 0
         html += f"""
     <div class="source-bar">
@@ -673,12 +859,15 @@ def write_html_report(dconn, mconn, min_confidence: int):
       <tbody>"""
 
     for i, g in enumerate(groups):
-        conf = g['confidence']
+        conf = g["confidence"]
         badge_class = f"badge-{conf}"
         type_class = f"type-{g['match_type']}"
-        members = dconn.execute("""
+        members = dconn.execute(
+            """
             SELECT * FROM duplicate_members WHERE group_id=? ORDER BY action DESC
-        """, (g['group_id'],)).fetchall()
+        """,
+            (g["group_id"],),
+        ).fetchall()
 
         html += f"""
         <tr>
@@ -696,8 +885,8 @@ def write_html_report(dconn, mconn, min_confidence: int):
               <tr><td><b>Action</b></td><td><b>Source</b></td><td><b>Filename</b></td><td><b>Size</b></td><td><b>Path / ID</b></td></tr>"""
 
         for m in members:
-            action_badge = 'badge-keep' if m['action'] == 'keep' else 'badge-delete'
-            location = m['source_path'] or m['cloud_file_id'] or '—'
+            action_badge = "badge-keep" if m["action"] == "keep" else "badge-delete"
+            location = m["source_path"] or m["cloud_file_id"] or "—"
             html += f"""
               <tr>
                 <td><span class="badge {action_badge}">{m['action']}</span></td>
@@ -730,20 +919,22 @@ function toggle(id) {{
 </body>
 </html>"""
 
-    with open(html_path, 'w') as f:
+    with open(html_path, "w") as f:
         f.write(html)
     return html_path
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description='StorageRationalizer Phase 2 Classifier')
-    parser.add_argument('--min-confidence', type=int, default=70,
-                        help='Minimum confidence threshold (default: 70)')
-    parser.add_argument('--sources', nargs='+',
-                        default=['google_drive','onedrive','macbook_local','icloud_drive','icloud_photos'],
-                        help='Sources to classify')
-    parser.add_argument('--reset', action='store_true', help='Wipe duplicates DB and start fresh')
+    parser = argparse.ArgumentParser(description="StorageRationalizer Phase 2 Classifier")
+    parser.add_argument("--min-confidence", type=int, default=70, help="Minimum confidence threshold (default: 70)")
+    parser.add_argument(
+        "--sources",
+        nargs="+",
+        default=["google_drive", "onedrive", "macbook_local", "icloud_drive", "icloud_photos"],
+        help="Sources to classify",
+    )
+    parser.add_argument("--reset", action="store_true", help="Wipe duplicates DB and start fresh")
     args = parser.parse_args()
 
     console.rule("[bold blue]StorageRationalizer — Phase 2 Classifier[/bold blue]")
@@ -770,8 +961,13 @@ def main():
         console.print(f"  {row['source']:<20} {row['c']:>8,} files")
     console.print()
 
-    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
-                  BarColumn(), TimeElapsedColumn(), console=console) as progress:
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
 
         task = progress.add_task("Classifying...", total=4)
 
@@ -795,8 +991,8 @@ def main():
 
     # Write reports
     console.print("[bold]Writing reports...[/bold]")
-    csv_path  = write_csv(dconn, args.min_confidence)
-    txt_path  = write_savings_summary(dconn, mconn)
+    csv_path = write_csv(dconn, args.min_confidence)
+    txt_path = write_savings_summary(dconn, mconn)
     html_path = write_html_report(dconn, mconn, args.min_confidence)
     console.print(f"  ✓ [cyan]{html_path}[/cyan]")
     console.print(f"  ✓ [cyan]{csv_path}[/cyan]")
@@ -811,5 +1007,5 @@ def main():
     dconn.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

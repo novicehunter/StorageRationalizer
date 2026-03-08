@@ -39,20 +39,17 @@ try:
     from cryptography.hazmat.primitives import hashes
     from cryptography.exceptions import InvalidTag
 except ImportError:
-    sys.exit(
-        "ERROR: 'cryptography' package not found.\n"
-        "Install it with:  pip install cryptography"
-    )
+    sys.exit("ERROR: 'cryptography' package not found.\n" "Install it with:  pip install cryptography")
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-_PBKDF2_ITERATIONS = 600_000   # OWASP 2023 recommendation for SHA-256
+_PBKDF2_ITERATIONS = 600_000  # OWASP 2023 recommendation for SHA-256
 _SALT_BYTES = 32
-_IV_BYTES = 12                  # AES-GCM standard nonce length
-_KEY_BYTES = 32                 # AES-256
-_CACHE_TTL_SECONDS = 3600       # 60 minutes
+_IV_BYTES = 12  # AES-GCM standard nonce length
+_KEY_BYTES = 32  # AES-256
+_CACHE_TTL_SECONDS = 3600  # 60 minutes
 _MAX_RETRIES = 3
 
 
@@ -71,6 +68,7 @@ def _encrypted_dir() -> Path:
 # ---------------------------------------------------------------------------
 # Key derivation
 # ---------------------------------------------------------------------------
+
 
 def _derive_key(password: str, salt: bytes) -> bytes:
     """
@@ -95,6 +93,7 @@ def _derive_key(password: str, salt: bytes) -> bytes:
 # ---------------------------------------------------------------------------
 # Low-level encrypt / decrypt
 # ---------------------------------------------------------------------------
+
 
 def _encrypt(plaintext: str, password: str) -> tuple[bytes, bytes, bytes]:
     """
@@ -164,6 +163,7 @@ def _find_legacy_files() -> list[tuple[str, Path]]:
 # ---------------------------------------------------------------------------
 # CredentialsManager
 # ---------------------------------------------------------------------------
+
 
 class CredentialsManager:
     """
@@ -354,14 +354,12 @@ class CredentialsManager:
 
         if not enc_path.exists():
             raise FileNotFoundError(
-                f"No credentials found for service '{service}'. "
-                f"Run save() first or migrate legacy files."
+                f"No credentials found for service '{service}'. " f"Run save() first or migrate legacy files."
             )
 
         if not meta_path.exists():
             raise FileNotFoundError(
-                f"Metadata file missing for service '{service}' ({meta_path}). "
-                "The encrypted store may be corrupted."
+                f"Metadata file missing for service '{service}' ({meta_path}). " "The encrypted store may be corrupted."
             )
 
         # Load metadata
@@ -370,9 +368,7 @@ class CredentialsManager:
             salt = bytes.fromhex(meta["salt"])
             iv = bytes.fromhex(meta["iv"])
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
-            raise RuntimeError(
-                f"Corrupted metadata for service '{service}': {exc}"
-            ) from exc
+            raise RuntimeError(f"Corrupted metadata for service '{service}': {exc}") from exc
 
         ciphertext = enc_path.read_bytes()
 
@@ -386,19 +382,14 @@ class CredentialsManager:
                 self._invalidate_cache()
                 remaining = _MAX_RETRIES - attempt
                 if remaining > 0:
-                    print(
-                        f"[credentials_manager] Wrong password. "
-                        f"{remaining} attempt(s) remaining."
-                    )
+                    print(f"[credentials_manager] Wrong password. " f"{remaining} attempt(s) remaining.")
                 else:
                     raise RuntimeError(
-                        f"Failed to decrypt credentials for service '{service}' "
-                        f"after {_MAX_RETRIES} attempts."
+                        f"Failed to decrypt credentials for service '{service}' " f"after {_MAX_RETRIES} attempts."
                     )
             except json.JSONDecodeError as exc:
                 raise RuntimeError(
-                    f"Decrypted data for service '{service}' is not valid JSON. "
-                    "The file may be corrupted."
+                    f"Decrypted data for service '{service}' is not valid JSON. " "The file may be corrupted."
                 ) from exc
 
         # Unreachable, but satisfies type checkers
@@ -429,6 +420,7 @@ class CredentialsManager:
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def _cli() -> None:
     """Minimal CLI for managing credentials from the terminal."""

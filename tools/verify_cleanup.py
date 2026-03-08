@@ -16,10 +16,10 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
 
-BASE        = Path.home() / "Desktop" / "StorageRationalizer"
-DUPES_DB    = BASE / "manifests" / "duplicates.db"
+BASE = Path.home() / "Desktop" / "StorageRationalizer"
+DUPES_DB = BASE / "manifests" / "duplicates.db"
 MANIFEST_DB = BASE / "manifests" / "manifest.db"
-LOGS_DIR    = BASE / "logs"
+LOGS_DIR = BASE / "logs"
 REPORTS_DIR = BASE / "reports"
 
 # Matches lines like:
@@ -27,9 +27,7 @@ REPORTS_DIR = BASE / "reports"
 #   [2026-03-08T15:50:28.012095+00:00] DELETED icloud_photos UUID some filename.jpg
 #   [2026-03-08T15:50:28.012095+00:00] TRASHED local /path/to/file → /Users/…/.Trash/file
 #   [2026-03-08T15:50:28.012095+00:00] DELETED local /path/to/file
-LOG_RE = re.compile(
-    r'^\[(?P<ts>[^\]]+)\] (?P<verb>TRASHED|DELETED) (?P<source>\S+) (?P<rest>.+)$'
-)
+LOG_RE = re.compile(r"^\[(?P<ts>[^\]]+)\] (?P<verb>TRASHED|DELETED) (?P<source>\S+) (?P<rest>.+)$")
 
 
 def find_latest_log() -> Path:
@@ -47,35 +45,41 @@ def parse_log_entries(log_path: Path) -> list[dict]:
             m = LOG_RE.match(line.rstrip())
             if not m:
                 continue
-            verb   = m.group("verb")
+            verb = m.group("verb")
             source = m.group("source")
-            rest   = m.group("rest")
+            rest = m.group("rest")
 
             if source in ("onedrive", "google_drive", "icloud_photos"):
                 # Format: <cloud_file_id> <filename…>
                 parts = rest.split(" ", 1)
                 cloud_id = parts[0]
                 filename = parts[1] if len(parts) > 1 else ""
-                entries.append({
-                    "verb": verb, "source": source,
-                    "cloud_file_id": cloud_id,
-                    "source_path": None,
-                    "filename": filename,
-                    "raw": line.rstrip(),
-                })
+                entries.append(
+                    {
+                        "verb": verb,
+                        "source": source,
+                        "cloud_file_id": cloud_id,
+                        "source_path": None,
+                        "filename": filename,
+                        "raw": line.rstrip(),
+                    }
+                )
             elif source == "local":
                 # TRASHED local /path → /trash/path   OR   DELETED local /path
                 if " → " in rest:
                     src_path = rest.split(" → ")[0]
                 else:
                     src_path = rest
-                entries.append({
-                    "verb": verb, "source": source,
-                    "cloud_file_id": None,
-                    "source_path": src_path,
-                    "filename": Path(src_path).name,
-                    "raw": line.rstrip(),
-                })
+                entries.append(
+                    {
+                        "verb": verb,
+                        "source": source,
+                        "cloud_file_id": None,
+                        "source_path": src_path,
+                        "filename": Path(src_path).name,
+                        "raw": line.rstrip(),
+                    }
+                )
     return entries
 
 
@@ -90,95 +94,95 @@ def verify_entries(entries: list[dict]) -> tuple[list, list]:
     mconn.row_factory = sqlite3.Row
 
     verified = []
-    flagged  = []
+    flagged = []
 
     for entry in entries:
-        source       = entry["source"]
-        cloud_id     = entry["cloud_file_id"]
-        source_path  = entry["source_path"]
-        filename     = entry["filename"]
+        source = entry["source"]
+        cloud_id = entry["cloud_file_id"]
+        source_path = entry["source_path"]
+        filename = entry["filename"]
 
         # ── Step 1: find the duplicate_member row for this deleted file ──────
         if cloud_id:
-            member = dconn.execute(
-                "SELECT * FROM duplicate_members WHERE cloud_file_id = ?",
-                (cloud_id,)
-            ).fetchone()
+            member = dconn.execute("SELECT * FROM duplicate_members WHERE cloud_file_id = ?", (cloud_id,)).fetchone()
         else:
-            member = dconn.execute(
-                "SELECT * FROM duplicate_members WHERE source_path = ?",
-                (source_path,)
-            ).fetchone()
+            member = dconn.execute("SELECT * FROM duplicate_members WHERE source_path = ?", (source_path,)).fetchone()
 
         if member is None:
-            flagged.append({**entry,
-                "reason": "NOT_IN_DUPLICATES_DB — no duplicate_members row found"})
+            flagged.append({**entry, "reason": "NOT_IN_DUPLICATES_DB — no duplicate_members row found"})
             continue
 
         group_id = member["group_id"]
-        file_id  = member["file_id"]
+        file_id = member["file_id"]
 
         # ── Step 2: get the group and its keep_file_id ────────────────────────
-        group = dconn.execute(
-            "SELECT * FROM duplicate_groups WHERE group_id = ?",
-            (group_id,)
-        ).fetchone()
+        group = dconn.execute("SELECT * FROM duplicate_groups WHERE group_id = ?", (group_id,)).fetchone()
 
         if group is None:
-            flagged.append({**entry,
-                "reason": f"NO_GROUP — group_id {group_id} not found in duplicate_groups"})
+            flagged.append({**entry, "reason": f"NO_GROUP — group_id {group_id} not found in duplicate_groups"})
             continue
 
         keep_file_id = group["keep_file_id"]
 
         if not keep_file_id:
-            flagged.append({**entry,
-                "reason": f"NO_KEEPER — group {group_id} has NULL keep_file_id"})
+            flagged.append({**entry, "reason": f"NO_KEEPER — group {group_id} has NULL keep_file_id"})
             continue
 
         if keep_file_id == file_id:
             # The "keep" copy was itself logged as deleted — self-referential problem
-            flagged.append({**entry,
-                "reason": f"KEEPER_IS_SELF — keep_file_id == this file's file_id ({file_id})"})
+            flagged.append({**entry, "reason": f"KEEPER_IS_SELF — keep_file_id == this file's file_id ({file_id})"})
             continue
 
         # ── Step 3: check the keep copy was not deleted in duplicates.db ─────
         keep_member = dconn.execute(
-            "SELECT * FROM duplicate_members WHERE file_id = ? AND group_id = ?",
-            (keep_file_id, group_id)
+            "SELECT * FROM duplicate_members WHERE file_id = ? AND group_id = ?", (keep_file_id, group_id)
         ).fetchone()
 
         if keep_member is None:
-            flagged.append({**entry,
-                "reason": f"KEEPER_MISSING — keep_file_id {keep_file_id} not in duplicate_members for group {group_id}"})
+            flagged.append(
+                {
+                    **entry,
+                    "reason": f"KEEPER_MISSING — keep_file_id {keep_file_id} not in duplicate_members for group {group_id}",
+                }
+            )
             continue
 
         if keep_member["action"] == "deleted":
-            flagged.append({**entry,
-                "reason": f"KEEPER_DELETED — keeper {keep_file_id} ({keep_member['source']}/{keep_member['filename']}) "
-                          f"has action='deleted' in duplicate_members"})
+            flagged.append(
+                {
+                    **entry,
+                    "reason": f"KEEPER_DELETED — keeper {keep_file_id} ({keep_member['source']}/{keep_member['filename']}) "
+                    f"has action='deleted' in duplicate_members",
+                }
+            )
             continue
 
         # ── Step 4: confirm keeper not marked DELETED_PHASE3 in manifest ─────
         manifest_keep = mconn.execute(
-            "SELECT file_id, scan_error, source, filename FROM files WHERE file_id = ?",
-            (keep_file_id,)
+            "SELECT file_id, scan_error, source, filename FROM files WHERE file_id = ?", (keep_file_id,)
         ).fetchone()
 
         if manifest_keep and manifest_keep["scan_error"] == "DELETED_PHASE3":
-            flagged.append({**entry,
-                "reason": f"KEEPER_PURGED — keeper {keep_file_id} ({manifest_keep['source']}/{manifest_keep['filename']}) "
-                          f"has scan_error=DELETED_PHASE3 in manifest.db"})
+            flagged.append(
+                {
+                    **entry,
+                    "reason": f"KEEPER_PURGED — keeper {keep_file_id} ({manifest_keep['source']}/{manifest_keep['filename']}) "
+                    f"has scan_error=DELETED_PHASE3 in manifest.db",
+                }
+            )
             continue
 
         # ── All checks passed ─────────────────────────────────────────────────
-        verified.append({**entry,
-            "group_id":     group_id,
-            "keep_file_id": keep_file_id,
-            "keep_source":  keep_member["source"],
-            "keep_filename": keep_member["filename"],
-            "confidence":   group["confidence"],
-        })
+        verified.append(
+            {
+                **entry,
+                "group_id": group_id,
+                "keep_file_id": keep_file_id,
+                "keep_source": keep_member["source"],
+                "keep_filename": keep_member["filename"],
+                "confidence": group["confidence"],
+            }
+        )
 
     dconn.close()
     mconn.close()

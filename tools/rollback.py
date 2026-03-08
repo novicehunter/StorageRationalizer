@@ -18,16 +18,17 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-BASE         = Path(__file__).parent.parent
-LOGS_DIR     = BASE / "logs"
-ROLLBACK_DB  = BASE / "manifests" / "rollback.db"
-MANIFEST_DB  = BASE / "manifests" / "manifest.db"
-CREDS_DIR    = BASE / "credentials"
-REPORTS_DIR  = BASE / "reports"
+BASE = Path(__file__).parent.parent
+LOGS_DIR = BASE / "logs"
+ROLLBACK_DB = BASE / "manifests" / "rollback.db"
+MANIFEST_DB = BASE / "manifests" / "manifest.db"
+CREDS_DIR = BASE / "credentials"
+REPORTS_DIR = BASE / "reports"
 
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
 
 def fmt_size(b):
     if not b:
@@ -41,6 +42,7 @@ def fmt_size(b):
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
+
 def get_db():
     ROLLBACK_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(ROLLBACK_DB))
@@ -50,7 +52,8 @@ def get_db():
 
 def init_db():
     with get_db() as db:
-        db.execute("""
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS cleanup_runs (
                 run_id        TEXT PRIMARY KEY,
                 log_file      TEXT NOT NULL,
@@ -62,8 +65,10 @@ def init_db():
                 is_complete   INTEGER DEFAULT 0,
                 synced_at     TEXT
             )
-        """)
-        db.execute("""
+        """
+        )
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS deleted_files (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id        TEXT    NOT NULL,
@@ -81,7 +86,8 @@ def init_db():
                 restore_error TEXT,
                 FOREIGN KEY (run_id) REFERENCES cleanup_runs(run_id)
             )
-        """)
+        """
+        )
         db.execute("CREATE INDEX IF NOT EXISTS idx_df_run    ON deleted_files(run_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_df_source ON deleted_files(source)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_df_folder ON deleted_files(parent_folder)")
@@ -91,13 +97,13 @@ def init_db():
 
 # ── Log parsing ───────────────────────────────────────────────────────────────
 
-_TS_RE     = re.compile(r"^\[([^\]]+)\]\s+(.*)")
-_LOC_RE    = re.compile(r"^(?:DELETED|TRASHED) local (.+?)(?:\s+→\s+(.+))?$")
-_GD_RE     = re.compile(r"^TRASHED google_drive (\S+) (.+)$")
-_OD_RE     = re.compile(r"^TRASHED onedrive (\S+) (.+)$")
-_ICP_RE    = re.compile(r"^DELETED icloud_photos (\S+) (.+)$")
-_START_RE  = re.compile(r"=== Phase 3 Cleaner started — mode=(\S+) files=(\d+)")
-_END_RE    = re.compile(r"=== Complete — deleted=(\d+)")
+_TS_RE = re.compile(r"^\[([^\]]+)\]\s+(.*)")
+_LOC_RE = re.compile(r"^(?:DELETED|TRASHED) local (.+?)(?:\s+→\s+(.+))?$")
+_GD_RE = re.compile(r"^TRASHED google_drive (\S+) (.+)$")
+_OD_RE = re.compile(r"^TRASHED onedrive (\S+) (.+)$")
+_ICP_RE = re.compile(r"^DELETED icloud_photos (\S+) (.+)$")
+_START_RE = re.compile(r"=== Phase 3 Cleaner started — mode=(\S+) files=(\d+)")
+_END_RE = re.compile(r"=== Complete — deleted=(\d+)")
 
 
 def _infer_local_source(path: str) -> str:
@@ -115,7 +121,7 @@ def _lookup_sizes(paths: list, cloud_ids: list) -> dict:
         conn = sqlite3.connect(str(MANIFEST_DB))
         paths_clean = [p for p in paths if p]
         if paths_clean:
-            ph   = ",".join("?" * len(paths_clean))
+            ph = ",".join("?" * len(paths_clean))
             rows = conn.execute(
                 f"SELECT source_path, file_size FROM files WHERE source_path IN ({ph})",
                 paths_clean,
@@ -125,7 +131,7 @@ def _lookup_sizes(paths: list, cloud_ids: list) -> dict:
                     sizes[row[0]] = row[1]
         cids_clean = [c for c in cloud_ids if c]
         if cids_clean:
-            ph   = ",".join("?" * len(cids_clean))
+            ph = ",".join("?" * len(cids_clean))
             rows = conn.execute(
                 f"SELECT cloud_file_id, file_size FROM files WHERE cloud_file_id IN ({ph})",
                 cids_clean,
@@ -141,12 +147,12 @@ def _lookup_sizes(paths: list, cloud_ids: list) -> dict:
 
 def parse_log(log_path: str) -> dict:
     """Parse a single cleanup_*.log → dict with run meta + list of record dicts."""
-    lf       = Path(log_path)
-    run_id   = lf.stem.replace("cleanup_", "")
-    mode     = "unknown"
-    total_files  = 0
-    is_complete  = False
-    start_ts     = None
+    lf = Path(log_path)
+    run_id = lf.stem.replace("cleanup_", "")
+    mode = "unknown"
+    total_files = 0
+    is_complete = False
+    start_ts = None
     records: list[dict] = []
 
     with open(log_path, "r") as f:
@@ -164,9 +170,9 @@ def parse_log(log_path: str) -> dict:
 
         sm = _START_RE.search(msg)
         if sm:
-            mode        = sm.group(1)
+            mode = sm.group(1)
             total_files = int(sm.group(2))
-            start_ts    = ts
+            start_ts = ts
             continue
 
         if _END_RE.search(msg):
@@ -175,53 +181,70 @@ def parse_log(log_path: str) -> dict:
 
         lm = _LOC_RE.match(msg)
         if lm:
-            src_path  = lm.group(1).strip()
+            src_path = lm.group(1).strip()
             trash_pth = lm.group(2).strip() if lm.group(2) else None
-            records.append({
-                "source":        _infer_local_source(src_path),
-                "filename":      Path(src_path).name,
-                "source_path":   src_path,
-                "trash_path":    trash_pth,
-                "cloud_id":      None,
-                "parent_folder": str(Path(src_path).parent),
-                "deleted_at":    ts_str,
-            })
+            records.append(
+                {
+                    "source": _infer_local_source(src_path),
+                    "filename": Path(src_path).name,
+                    "source_path": src_path,
+                    "trash_path": trash_pth,
+                    "cloud_id": None,
+                    "parent_folder": str(Path(src_path).parent),
+                    "deleted_at": ts_str,
+                }
+            )
             continue
 
         gm = _GD_RE.match(msg)
         if gm:
-            records.append({
-                "source": "google_drive", "cloud_id": gm.group(1),
-                "filename": gm.group(2).strip(), "source_path": None,
-                "trash_path": None, "parent_folder": None,
-                "deleted_at": ts_str,
-            })
+            records.append(
+                {
+                    "source": "google_drive",
+                    "cloud_id": gm.group(1),
+                    "filename": gm.group(2).strip(),
+                    "source_path": None,
+                    "trash_path": None,
+                    "parent_folder": None,
+                    "deleted_at": ts_str,
+                }
+            )
             continue
 
         om = _OD_RE.match(msg)
         if om:
-            records.append({
-                "source": "onedrive", "cloud_id": om.group(1),
-                "filename": om.group(2).strip(), "source_path": None,
-                "trash_path": None, "parent_folder": None,
-                "deleted_at": ts_str,
-            })
+            records.append(
+                {
+                    "source": "onedrive",
+                    "cloud_id": om.group(1),
+                    "filename": om.group(2).strip(),
+                    "source_path": None,
+                    "trash_path": None,
+                    "parent_folder": None,
+                    "deleted_at": ts_str,
+                }
+            )
             continue
 
         im = _ICP_RE.match(msg)
         if im:
-            records.append({
-                "source": "icloud_photos", "cloud_id": im.group(1),
-                "filename": im.group(2).strip(), "source_path": None,
-                "trash_path": None, "parent_folder": None,
-                "deleted_at": ts_str,
-            })
+            records.append(
+                {
+                    "source": "icloud_photos",
+                    "cloud_id": im.group(1),
+                    "filename": im.group(2).strip(),
+                    "source_path": None,
+                    "trash_path": None,
+                    "parent_folder": None,
+                    "deleted_at": ts_str,
+                }
+            )
             continue
 
     # Enrich with file sizes from manifest.db
-    paths     = [r["source_path"] for r in records if r.get("source_path")]
-    cloud_ids = [r["cloud_id"]    for r in records if r.get("cloud_id")]
-    sizes     = _lookup_sizes(paths, cloud_ids)
+    paths = [r["source_path"] for r in records if r.get("source_path")]
+    cloud_ids = [r["cloud_id"] for r in records if r.get("cloud_id")]
+    sizes = _lookup_sizes(paths, cloud_ids)
     for r in records:
         key = r.get("source_path") or r.get("cloud_id")
         r["file_size"] = sizes.get(key)
@@ -229,15 +252,15 @@ def parse_log(log_path: str) -> dict:
     total_size = sum(r["file_size"] or 0 for r in records)
 
     return {
-        "run_id":       run_id,
-        "log_file":     lf.name,
-        "timestamp":    start_ts.isoformat() if start_ts else None,
-        "mode":         mode,
+        "run_id": run_id,
+        "log_file": lf.name,
+        "timestamp": start_ts.isoformat() if start_ts else None,
+        "mode": mode,
         "total_deleted": len(records),
-        "total_files":   total_files,
-        "total_size":    total_size,
-        "is_complete":   is_complete,
-        "records":       records,
+        "total_files": total_files,
+        "total_size": total_size,
+        "is_complete": is_complete,
+        "records": records,
     }
 
 
@@ -253,7 +276,8 @@ def sync_all_logs(verbose: bool = True) -> int:
 
     for lf in log_files:
         run = parse_log(lf)
-        db.execute("""
+        db.execute(
+            """
             INSERT INTO cleanup_runs
                 (run_id, log_file, timestamp, mode,
                  total_deleted, total_files, total_size, is_complete, synced_at)
@@ -263,13 +287,22 @@ def sync_all_logs(verbose: bool = True) -> int:
                 total_size    = excluded.total_size,
                 is_complete   = excluded.is_complete,
                 synced_at     = excluded.synced_at
-        """, (run["run_id"], run["log_file"], run["timestamp"], run["mode"],
-              run["total_deleted"], run["total_files"], run["total_size"],
-              int(run["is_complete"]), now_iso()))
+        """,
+            (
+                run["run_id"],
+                run["log_file"],
+                run["timestamp"],
+                run["mode"],
+                run["total_deleted"],
+                run["total_files"],
+                run["total_size"],
+                int(run["is_complete"]),
+                now_iso(),
+            ),
+        )
 
         # Preserve already-restored records; drop and re-insert the rest
-        db.execute("DELETE FROM deleted_files WHERE run_id=? AND restored=0",
-                   (run["run_id"],))
+        db.execute("DELETE FROM deleted_files WHERE run_id=? AND restored=0", (run["run_id"],))
 
         for rec in run["records"]:
             # Skip if this exact file was already restored in a previous sync
@@ -277,18 +310,29 @@ def sync_all_logs(verbose: bool = True) -> int:
                 """SELECT id FROM deleted_files
                    WHERE run_id=? AND restored=1
                      AND (source_path=? OR (cloud_id IS NOT NULL AND cloud_id=?))""",
-                (run["run_id"], rec.get("source_path"), rec.get("cloud_id"))
+                (run["run_id"], rec.get("source_path"), rec.get("cloud_id")),
             ).fetchone()
             if dup:
                 continue
-            db.execute("""
+            db.execute(
+                """
                 INSERT INTO deleted_files
                     (run_id, cloud_id, source, filename, source_path,
                      trash_path, parent_folder, file_size, deleted_at)
                 VALUES (?,?,?,?,?,?,?,?,?)
-            """, (run["run_id"], rec.get("cloud_id"), rec["source"],
-                  rec["filename"], rec.get("source_path"), rec.get("trash_path"),
-                  rec.get("parent_folder"), rec.get("file_size"), rec["deleted_at"]))
+            """,
+                (
+                    run["run_id"],
+                    rec.get("cloud_id"),
+                    rec["source"],
+                    rec["filename"],
+                    rec.get("source_path"),
+                    rec.get("trash_path"),
+                    rec.get("parent_folder"),
+                    rec.get("file_size"),
+                    rec["deleted_at"],
+                ),
+            )
 
         db.commit()
         synced += 1
@@ -301,10 +345,11 @@ def sync_all_logs(verbose: bool = True) -> int:
 
 # ── Restore methods ───────────────────────────────────────────────────────────
 
+
 def _restore_local(rec: dict) -> tuple:
-    src  = rec.get("source_path")
+    src = rec.get("source_path")
     trash = rec.get("trash_path")
-    name  = rec["filename"]
+    name = rec["filename"]
 
     if not src:
         return False, "No source_path recorded"
@@ -343,8 +388,7 @@ tell application "Finder"
 end tell
 """
     try:
-        r = subprocess.run(["osascript", "-e", script],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=30)
         if r.returncode == 0 and "ok" in r.stdout:
             return True, "Restored via Finder Trash"
         return False, f"Not found in macOS Trash (filename: {name})"
@@ -362,6 +406,7 @@ def _restore_google_drive(rec: dict) -> tuple:
     try:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
+
         with open(token_file) as f:
             td = json.load(f)
         creds = Credentials(
@@ -391,6 +436,7 @@ def _restore_onedrive(rec: dict) -> tuple:
         return False, "onedrive_token.json not found — authenticate via cleaner.py first"
     try:
         import requests
+
         with open(token_file) as f:
             td = json.load(f)
         token = td.get("access_token")
@@ -398,8 +444,7 @@ def _restore_onedrive(rec: dict) -> tuple:
             return False, "OneDrive access_token missing or expired"
         resp = requests.post(
             f"https://graph.microsoft.com/v1.0/me/drive/items/{cid}/restore",
-            headers={"Authorization": f"Bearer {token}",
-                     "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={},
             timeout=30,
         )
@@ -411,7 +456,7 @@ def _restore_onedrive(rec: dict) -> tuple:
 
 
 def _restore_icloud_photos(rec: dict) -> tuple:
-    cid  = rec.get("cloud_id")
+    cid = rec.get("cloud_id")
     name = rec["filename"]
     if not cid:
         return False, "No cloud_id"
@@ -429,8 +474,7 @@ tell application "Photos"
 end tell
 """
     try:
-        r = subprocess.run(["osascript", "-e", script],
-                           capture_output=True, text=True, timeout=60)
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=60)
         if r.returncode == 0 and "ok" in r.stdout:
             return True, f"Recovered iCloud Photos item {cid}"
         return False, f"Not found in Recently Deleted (id: {cid}, file: {name})"
@@ -453,7 +497,7 @@ def _restore_one(rec: dict) -> tuple:
 
 def restore_files(file_ids: list) -> list:
     """Restore deleted_files rows by id. Updates DB. Returns list of result dicts."""
-    db      = get_db()
+    db = get_db()
     results = []
     for fid in file_ids:
         row = db.execute("SELECT * FROM deleted_files WHERE id=?", (fid,)).fetchone()
@@ -461,43 +505,36 @@ def restore_files(file_ids: list) -> list:
             results.append({"id": fid, "ok": False, "msg": "Record not found"})
             continue
         if row["restored"]:
-            results.append({"id": fid, "filename": row["filename"],
-                             "source": row["source"], "ok": True, "msg": "Already restored"})
+            results.append(
+                {"id": fid, "filename": row["filename"], "source": row["source"], "ok": True, "msg": "Already restored"}
+            )
             continue
-        rec    = dict(row)
+        rec = dict(row)
         ok, msg = _restore_one(rec)
-        ts     = now_iso()
+        ts = now_iso()
         if ok:
-            db.execute(
-                "UPDATE deleted_files SET restored=1, restored_at=?, restore_error=NULL WHERE id=?",
-                (ts, fid))
+            db.execute("UPDATE deleted_files SET restored=1, restored_at=?, restore_error=NULL WHERE id=?", (ts, fid))
         else:
-            db.execute(
-                "UPDATE deleted_files SET restore_error=? WHERE id=?",
-                (msg, fid))
+            db.execute("UPDATE deleted_files SET restore_error=? WHERE id=?", (msg, fid))
         db.commit()
-        results.append({"id": fid, "filename": rec["filename"],
-                         "source": rec["source"], "ok": ok, "msg": msg})
+        results.append({"id": fid, "filename": rec["filename"], "source": rec["source"], "ok": ok, "msg": msg})
     db.close()
     return results
 
 
-def build_restore_ids(run_id: str, scope: str,
-                      source: str = None, folder: str = None) -> list:
+def build_restore_ids(run_id: str, scope: str, source: str = None, folder: str = None) -> list:
     """Return list of deleted_files.id matching the given scope."""
     db = get_db()
     if scope == "run":
-        rows = db.execute(
-            "SELECT id FROM deleted_files WHERE run_id=? AND restored=0",
-            (run_id,)).fetchall()
+        rows = db.execute("SELECT id FROM deleted_files WHERE run_id=? AND restored=0", (run_id,)).fetchall()
     elif scope == "source" and source:
         rows = db.execute(
-            "SELECT id FROM deleted_files WHERE run_id=? AND source=? AND restored=0",
-            (run_id, source)).fetchall()
+            "SELECT id FROM deleted_files WHERE run_id=? AND source=? AND restored=0", (run_id, source)
+        ).fetchall()
     elif scope == "folder" and folder:
         rows = db.execute(
-            "SELECT id FROM deleted_files WHERE run_id=? AND parent_folder=? AND restored=0",
-            (run_id, folder)).fetchall()
+            "SELECT id FROM deleted_files WHERE run_id=? AND parent_folder=? AND restored=0", (run_id, folder)
+        ).fetchall()
     else:
         rows = []
     db.close()
@@ -506,12 +543,13 @@ def build_restore_ids(run_id: str, scope: str,
 
 # ── HTML Report ───────────────────────────────────────────────────────────────
 
+
 def generate_report(run_id: str, results: list) -> str:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = REPORTS_DIR / f"rollback_report_{ts}.html"
 
-    ok_n   = sum(1 for r in results if r.get("ok"))
+    ok_n = sum(1 for r in results if r.get("ok"))
     fail_n = len(results) - ok_n
 
     rows_html = "".join(
@@ -581,15 +619,12 @@ if __name__ == "__main__":
         description="StorageRationalizer — Rollback Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--sync", action="store_true",
-                        help="Re-parse all cleanup_*.log files into rollback.db")
-    parser.add_argument("--restore", action="store_true",
-                        help="Restore files from trash/recycle-bin")
-    parser.add_argument("--run-id",  help="Cleanup run ID (e.g. 20260308_124626)")
-    parser.add_argument("--scope",   choices=["run", "source", "folder", "files"],
-                        help="Restore scope")
-    parser.add_argument("--source",  help="Source filter (scope=source)")
-    parser.add_argument("--folder",  help="Parent folder filter (scope=folder)")
+    parser.add_argument("--sync", action="store_true", help="Re-parse all cleanup_*.log files into rollback.db")
+    parser.add_argument("--restore", action="store_true", help="Restore files from trash/recycle-bin")
+    parser.add_argument("--run-id", help="Cleanup run ID (e.g. 20260308_124626)")
+    parser.add_argument("--scope", choices=["run", "source", "folder", "files"], help="Restore scope")
+    parser.add_argument("--source", help="Source filter (scope=source)")
+    parser.add_argument("--folder", help="Parent folder filter (scope=folder)")
     parser.add_argument("--file-ids", help="Comma-separated deleted_files.id list (scope=files)")
     args = parser.parse_args()
 
@@ -604,8 +639,10 @@ if __name__ == "__main__":
             ids = [int(x.strip()) for x in args.file_ids.split(",") if x.strip()]
         elif args.run_id and args.scope:
             ids = build_restore_ids(
-                args.run_id, args.scope,
-                source=args.source, folder=args.folder,
+                args.run_id,
+                args.scope,
+                source=args.source,
+                folder=args.folder,
             )
         else:
             parser.error("Provide --run-id + --scope, or --file-ids")
