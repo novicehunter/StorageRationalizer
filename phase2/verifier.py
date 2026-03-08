@@ -136,11 +136,11 @@ def get_onedrive_token():
         )
         accounts = app.get_accounts()
         if accounts:
-            result = app.acquire_token_silent(['Files.Read.All'], account=accounts[0])
+            result = app.acquire_token_silent(['Files.ReadWrite.All'], account=accounts[0])
             if result and 'access_token' in result:
                 return result['access_token']
 
-        flow = app.initiate_device_flow(scopes=['Files.Read.All'])
+        flow = app.initiate_device_flow(scopes=['Files.ReadWrite.All'])
         console.print(f"[yellow]{flow['message']}[/yellow]")
         result = app.acquire_token_by_device_flow(flow)
         if 'access_token' in result:
