@@ -406,6 +406,8 @@ class TestAPIResponseTampering:
 class TestCredentialTamperDetection:
     def test_tampered_ciphertext_rejected(self, tmp_path):
         """Flip bytes in ciphertext — AES-GCM auth tag must catch it."""
+        from unittest.mock import patch
+
         cm = make_cm(tmp_path)
         cm.save("svc", "key", "original-value")
 
@@ -416,13 +418,19 @@ class TestCredentialTamperDetection:
             raw[len(raw) // 2] ^= 0xFF
         enc_path.write_bytes(bytes(raw))
 
-        # New manager with same password should fail to decrypt
+        # New manager with correct password — tampered data must still fail
         cm2 = make_cm(tmp_path)
-        with pytest.raises(RuntimeError, match="Failed to decrypt"):
-            cm2.load("svc", "key")
+        with patch(
+            "tools.credentials_manager.getpass.getpass",
+            return_value="security-test-password",  # pragma: allowlist secret
+        ):
+            with pytest.raises(RuntimeError, match="Failed to decrypt"):
+                cm2.load("svc", "key")
 
     def test_tampered_meta_salt_rejected(self, tmp_path):
         """Corrupt the salt in meta — key derivation produces wrong key."""
+        from unittest.mock import patch
+
         cm = make_cm(tmp_path)
         cm.save("svc", "key", "original-value")
 
@@ -435,11 +443,17 @@ class TestCredentialTamperDetection:
         meta_path.write_text(json.dumps(meta))
 
         cm2 = make_cm(tmp_path)
-        with pytest.raises(RuntimeError, match="Failed to decrypt"):
-            cm2.load("svc", "key")
+        with patch(
+            "tools.credentials_manager.getpass.getpass",
+            return_value="security-test-password",  # pragma: allowlist secret
+        ):
+            with pytest.raises(RuntimeError, match="Failed to decrypt"):
+                cm2.load("svc", "key")
 
     def test_tampered_meta_iv_rejected(self, tmp_path):
         """Corrupt the IV in meta — decryption must fail."""
+        from unittest.mock import patch
+
         cm = make_cm(tmp_path)
         cm.save("svc", "key", "original-value")
 
@@ -451,8 +465,12 @@ class TestCredentialTamperDetection:
         meta_path.write_text(json.dumps(meta))
 
         cm2 = make_cm(tmp_path)
-        with pytest.raises(RuntimeError, match="Failed to decrypt"):
-            cm2.load("svc", "key")
+        with patch(
+            "tools.credentials_manager.getpass.getpass",
+            return_value="security-test-password",  # pragma: allowlist secret
+        ):
+            with pytest.raises(RuntimeError, match="Failed to decrypt"):
+                cm2.load("svc", "key")
 
     def test_plaintext_not_in_enc_file(self, tmp_path):
         """Credentials should never appear as plaintext on disk."""

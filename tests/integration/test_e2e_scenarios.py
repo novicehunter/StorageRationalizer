@@ -172,6 +172,8 @@ class TestFailureHandling:
 
     def test_credential_wrong_password_blocks_pipeline(self, creds_dir):
         """Wrong master password should prevent credential loading."""
+        from unittest.mock import patch
+
         writer = CredentialsManager(encrypted_dir=creds_dir)
         writer._cached_password = "correct-password"  # pragma: allowlist secret
         writer._cache_ts = float("inf")
@@ -181,8 +183,13 @@ class TestFailureHandling:
         reader._cached_password = "wrong-password"  # pragma: allowlist secret
         reader._cache_ts = float("inf")
 
-        with pytest.raises(RuntimeError, match="Failed to decrypt"):
-            reader.load("svc", "token")
+        # Mock getpass so retries after cache-invalidation don't block on stdin
+        with patch(
+            "tools.credentials_manager.getpass.getpass",
+            return_value="wrong-password",  # pragma: allowlist secret
+        ):
+            with pytest.raises(RuntimeError, match="Failed to decrypt"):
+                reader.load("svc", "token")
 
 
 # ---------------------------------------------------------------------------

@@ -153,8 +153,13 @@ class TestErrorHandling:
         reader._cached_password = "wrong-password"  # pragma: allowlist secret
         reader._cache_ts = float("inf")
 
-        with pytest.raises(RuntimeError, match="Failed to decrypt"):
-            reader.load("svc", "key")
+        # Mock getpass so retries after cache-invalidation don't block on stdin
+        with patch(
+            "tools.credentials_manager.getpass.getpass",
+            return_value="wrong-password",  # pragma: allowlist secret
+        ):
+            with pytest.raises(RuntimeError, match="Failed to decrypt"):
+                reader.load("svc", "key")
 
 
 # ---------------------------------------------------------------------------

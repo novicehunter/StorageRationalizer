@@ -29,7 +29,7 @@ All 3 CRITICAL vulnerabilities fixed and tested:
 2. **Silent API failures** → Fixed with response validation
 3. **AppleScript injection** → Fixed with input sanitization
 
-**Tests:** 49/49 passing | **Coverage:** ≥90%
+**Tests:** 346+ passing (49 unit + 106 integration + 47 security + 18 performance) | **Coverage:** ≥90% security modules
 
 **Key Commits:**
 - `df1d92e` — Add governance docs (Phase 3)
