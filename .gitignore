@@ -38,3 +38,7 @@ build/
 !logs/.gitkeep
 !reports/.gitkeep
 credentials/onedrive_credentials.txt
+.pytest_cache/
+__pycache__/
+.mypy_cache/
+.coverage
