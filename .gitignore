@@ -42,3 +42,11 @@ credentials/onedrive_credentials.txt
 __pycache__/
 .mypy_cache/
 .coverage
+
+# Audit artifacts (timestamped logs not committed unless needed)
+docs/AUDIT_LOG_*.md
+docs/AUDIT_LOG_*.md.bak
+audit_cache.json
+*.audit.tmp
+.audit_history/
+# Note: docs/CLAUDE_SESSION_REFERENCE.md is intentionally NOT ignored — commit it
