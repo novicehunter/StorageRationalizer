@@ -24,13 +24,18 @@ import hashlib
 import json
 import mimetypes
 import sqlite3
+import sys
 import uuid
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
+
+# Ensure project root is in path so tools/ imports resolve when running phase1/scanner.py
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from tools.input_validators import InputValidationError, validate_directory_path  # noqa: E402
 
 console = Console()
 
@@ -286,6 +291,11 @@ def scan_local(conn, progress, task):
     for root in LOCAL_SCAN_PATHS:
         if not root.exists():
             continue
+        try:
+            validate_directory_path(str(root))
+        except InputValidationError as e:
+            log_error("macbook_local", f"Directory validation failed, skipping {root}: {e}")
+            continue
         for path in root.rglob("*"):
             if path.is_dir() or should_skip(path):
                 continue
@@ -351,6 +361,12 @@ def scan_icloud_drive(conn, progress, task):
     stats = {"found": 0, "new": 0, "errors": 0}
     if not ICLOUD_DRIVE_PATH.exists():
         console.print(f"[yellow]iCloud Drive path not found: {ICLOUD_DRIVE_PATH}[/yellow]")
+        return stats
+    try:
+        validate_directory_path(str(ICLOUD_DRIVE_PATH))
+    except InputValidationError as e:
+        log_error("icloud_drive", f"Directory validation failed: {e}")
+        console.print(f"[red]iCloud Drive path failed validation: {e}[/red]")
         return stats
     for path in ICLOUD_DRIVE_PATH.rglob("*"):
         if path.is_dir() or should_skip(path) or path.suffix == ".icloud":

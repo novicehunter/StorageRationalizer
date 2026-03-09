@@ -27,6 +27,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
+from tools.input_validators import (
+    InputValidationError,
+    sanitize_applescript_string,
+    validate_file_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -372,7 +378,11 @@ def _restore_local(rec: dict) -> tuple:
     # 1. Known trash_path (TRASHED fallback branch)
     if trash and Path(trash).exists():
         try:
-            shutil.move(str(trash), str(dest))
+            try:
+                safe_trash = validate_file_path(str(trash))
+            except InputValidationError as e:
+                return False, f"Invalid trash path: {e}"
+            shutil.move(safe_trash, str(dest))
             return True, f"Moved {trash} → {src}"
         except Exception as e:
             return False, str(e)
@@ -381,18 +391,24 @@ def _restore_local(rec: dict) -> tuple:
     trash_candidate = Path.home() / ".Trash" / name
     if trash_candidate.exists():
         try:
-            shutil.move(str(trash_candidate), str(dest))
+            try:
+                safe_candidate = validate_file_path(str(trash_candidate))
+            except InputValidationError as e:
+                return False, f"Invalid trash candidate path: {e}"
+            shutil.move(safe_candidate, str(dest))
             return True, f"Restored from ~/.Trash/{name}"
         except Exception as e:
             return False, str(e)
 
     # 3. AppleScript — search Finder Trash by name
+    safe_name = sanitize_applescript_string(name)
+    safe_dest_parent = sanitize_applescript_string(str(dest.parent))
     script = f"""
 tell application "Finder"
     set trashItems to items of trash
     repeat with theItem in trashItems
-        if name of theItem is "{name.replace('"', '')}" then
-            move theItem to POSIX file "{str(dest.parent).replace('"', '')}"
+        if name of theItem is "{safe_name}" then
+            move theItem to POSIX file "{safe_dest_parent}"
             return "ok"
         end if
     end repeat
@@ -487,12 +503,13 @@ def _restore_icloud_photos(rec: dict) -> tuple:
     name = rec["filename"]
     if not cid:
         return False, "No cloud_id"
+    safe_cid = sanitize_applescript_string(cid)
     script = f"""
 tell application "Photos"
     set deletedAlbum to recently deleted album
     set thePhotos to media items of deletedAlbum
     repeat with thePhoto in thePhotos
-        if id of thePhoto is "{cid.replace('"', '')}" then
+        if id of thePhoto is "{safe_cid}" then
             recover thePhoto
             return "ok"
         end if
