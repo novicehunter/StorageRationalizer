@@ -6,13 +6,18 @@ Open: http://localhost:5000
 Data: saved to tracker_data.db in the same folder
 """
 
-import sqlite3, json, os, glob, re, sys
+import glob
+import json
+import os
+import re
+import sqlite3
+import sys
 from flask import Flask, render_template, request, jsonify, send_file
 from datetime import datetime, timezone
 
 # Allow importing rollback.py from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-import rollback as _rb
+import rollback as _rb  # noqa: E402
 
 app = Flask(__name__)
 DB = os.path.join(os.path.dirname(__file__), "tracker_data.db")
@@ -71,8 +76,13 @@ def load_all():
     """Load all saved data in one shot."""
     with get_db() as db:
         fields = {r["key"]: r["value"] for r in db.execute("SELECT key, value FROM fields")}
-        notes = {r["section"]: r["content"] for r in db.execute("SELECT section, content FROM notes")}
-        checks = {r["item_id"]: bool(r["checked"]) for r in db.execute("SELECT item_id, checked FROM checklist")}
+        notes = {
+            r["section"]: r["content"] for r in db.execute("SELECT section, content FROM notes")
+        }
+        checks = {
+            r["item_id"]: bool(r["checked"])
+            for r in db.execute("SELECT item_id, checked FROM checklist")
+        }
     return jsonify({"fields": fields, "notes": notes, "checks": checks})
 
 
@@ -104,7 +114,8 @@ def save_note():
             """
             INSERT INTO notes (section, content, updated_at)
             VALUES (?, ?, datetime('now'))
-            ON CONFLICT(section) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at
+            ON CONFLICT(section) DO UPDATE
+            SET content=excluded.content, updated_at=excluded.updated_at
         """,
             (section, content),
         )
@@ -122,7 +133,8 @@ def save_check():
             """
             INSERT INTO checklist (item_id, checked, updated_at)
             VALUES (?, ?, datetime('now'))
-            ON CONFLICT(item_id) DO UPDATE SET checked=excluded.checked, updated_at=excluded.updated_at
+            ON CONFLICT(item_id) DO UPDATE
+            SET checked=excluded.checked, updated_at=excluded.updated_at
         """,
             (item_id, checked),
         )
@@ -135,14 +147,26 @@ def export_data():
     """Export all data as JSON backup."""
     with get_db() as db:
         fields = {r["key"]: r["value"] for r in db.execute("SELECT key, value FROM fields")}
-        notes = {r["section"]: r["content"] for r in db.execute("SELECT section, content FROM notes")}
-        checks = {r["item_id"]: bool(r["checked"]) for r in db.execute("SELECT item_id, checked FROM checklist")}
-    export = {"exported_at": datetime.now().isoformat(), "fields": fields, "notes": notes, "checks": checks}
+        notes = {
+            r["section"]: r["content"] for r in db.execute("SELECT section, content FROM notes")
+        }
+        checks = {
+            r["item_id"]: bool(r["checked"])
+            for r in db.execute("SELECT item_id, checked FROM checklist")
+        }
+    export = {
+        "exported_at": datetime.now().isoformat(),
+        "fields": fields,
+        "notes": notes,
+        "checks": checks,
+    }
     path = os.path.join(os.path.dirname(__file__), "tracker_backup.json")
     with open(path, "w") as f:
         json.dump(export, f, indent=2)
     return send_file(
-        path, as_attachment=True, download_name=f"StorageRationalizer_backup_{datetime.now().strftime('%Y-%m-%d')}.json"
+        path,
+        as_attachment=True,
+        download_name=f"StorageRationalizer_backup_{datetime.now().strftime('%Y-%m-%d')}.json",
     )
 
 
@@ -153,17 +177,20 @@ def import_data():
     with get_db() as db:
         for k, v in data.get("fields", {}).items():
             db.execute(
-                "INSERT INTO fields (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                "INSERT INTO fields (key,value) VALUES (?,?)"
+                " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (k, v),
             )
         for s, c in data.get("notes", {}).items():
             db.execute(
-                "INSERT INTO notes (section,content) VALUES (?,?) ON CONFLICT(section) DO UPDATE SET content=excluded.content",
+                "INSERT INTO notes (section,content) VALUES (?,?)"
+                " ON CONFLICT(section) DO UPDATE SET content=excluded.content",
                 (s, c),
             )
         for i, c in data.get("checks", {}).items():
             db.execute(
-                "INSERT INTO checklist (item_id,checked) VALUES (?,?) ON CONFLICT(item_id) DO UPDATE SET checked=excluded.checked",
+                "INSERT INTO checklist (item_id,checked) VALUES (?,?)"
+                " ON CONFLICT(item_id) DO UPDATE SET checked=excluded.checked",
                 (i, int(c)),
             )
         db.commit()
@@ -282,14 +309,16 @@ def cleanup_status():
     try:
         if os.path.exists(DUPES_DB):
             conn = sqlite3.connect(DUPES_DB)
-            row = conn.execute("SELECT SUM(file_size) FROM duplicate_members WHERE action='deleted'").fetchone()
+            row = conn.execute(
+                "SELECT SUM(file_size) FROM duplicate_members WHERE action='deleted'"
+            ).fetchone()
             conn.close()
             if row and row[0]:
                 space_recovered_gb = round(row[0] / (1024**3), 2)
     except Exception:
         pass
 
-    last_lines = [l.rstrip() for l in lines if l.strip()][-20:]
+    last_lines = [item.rstrip() for item in lines if item.strip()][-20:]
 
     return jsonify(
         {
@@ -336,8 +365,10 @@ def rollback_runs():
     rows = db.execute(
         """
         SELECT r.*,
-               (SELECT COUNT(*) FROM deleted_files d WHERE d.run_id=r.run_id AND d.restored=0) AS pending,
-               (SELECT COUNT(*) FROM deleted_files d WHERE d.run_id=r.run_id AND d.restored=1) AS restored
+               (SELECT COUNT(*) FROM deleted_files d
+                WHERE d.run_id=r.run_id AND d.restored=0) AS pending,
+               (SELECT COUNT(*) FROM deleted_files d
+                WHERE d.run_id=r.run_id AND d.restored=1) AS restored
         FROM cleanup_runs r
         ORDER BY r.timestamp DESC
     """
@@ -389,7 +420,9 @@ def rollback_files():
         where += " AND filename LIKE ?"
         params.append(f"%{search}%")
 
-    rows = db.execute(f"SELECT * FROM deleted_files WHERE {where} ORDER BY deleted_at DESC", params).fetchall()
+    rows = db.execute(
+        f"SELECT * FROM deleted_files WHERE {where} ORDER BY deleted_at DESC", params
+    ).fetchall()
 
     # Also return folder breakdown for the run (unfiltered)
     folders = db.execute(
@@ -437,7 +470,9 @@ def rollback_restore():
         return jsonify({"ok": False, "error": "Invalid scope or missing run_id"}), 400
 
     if not ids:
-        return jsonify({"ok": True, "results": [], "report": None, "msg": "No restorable files matched"})
+        return jsonify(
+            {"ok": True, "results": [], "report": None, "msg": "No restorable files matched"}
+        )
 
     results = _rb.restore_files(ids)
     report_path = _rb.generate_report(run_id or "manual", results)

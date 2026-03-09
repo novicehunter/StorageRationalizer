@@ -5,7 +5,7 @@ Tests multiple approaches to access Google Photos without restricted scopes.
 Run: python3 gphotos_test.py
 """
 
-import json, requests
+import requests
 from pathlib import Path
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -39,7 +39,10 @@ try:
     resp = (
         service.files()
         .list(
-            q="name='Google Photos' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            q=(
+                "name='Google Photos' and "
+                "mimeType='application/vnd.google-apps.folder' and trashed=false"
+            ),
             fields="files(id,name,parents)",
             includeItemsFromAllDrives=True,
             supportsAllDrives=True,
@@ -56,12 +59,16 @@ try:
         folder_id = folders[0]["id"]
         children = (
             service.files()
-            .list(q=f"'{folder_id}' in parents and trashed=false", fields="files(id,name,mimeType,size)", pageSize=5)
+            .list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                fields="files(id,name,mimeType,size)",
+                pageSize=5,
+            )
             .execute()
         )
-        print(f"  ✓ Sample files inside: {len(children.get('files',[]))}")
+        print(f"  ✓ Sample files inside: {len(children.get('files', []))}")
         for f in children.get("files", []):
-            print(f"    {f.get('name')} — {f.get('mimeType')} — {f.get('size','?')} bytes")
+            print(f"    {f.get('name')} — {f.get('mimeType')} — {f.get('size', '?')} bytes")
     else:
         print("  ✗ No Google Photos folder found in Drive")
 except Exception as e:
@@ -84,7 +91,7 @@ try:
     if files:
         print(f"  ✓ Found images in photos space: {len(files)} (sample)")
         for f in files:
-            print(f"    {f.get('name')} — {f.get('createdTime','?')}")
+            print(f"    {f.get('name')} — {f.get('createdTime', '?')}")
     else:
         print("  ✗ No images found in photos space")
 except Exception as e:
@@ -116,7 +123,10 @@ except Exception as e:
 print("\n── Test 4: Photos Library API (current token) ──")
 try:
     resp = requests.get(
-        "https://photoslibrary.googleapis.com/v1/mediaItems", headers=headers, params={"pageSize": 5}, timeout=15
+        "https://photoslibrary.googleapis.com/v1/mediaItems",
+        headers=headers,
+        params={"pageSize": 5},
+        timeout=15,
     )
     print(f"  Status: {resp.status_code}")
     if resp.status_code == 200:
@@ -125,7 +135,7 @@ try:
         for item in items:
             print(f"    {item.get('filename')} — {item.get('mimeType')}")
     else:
-        print(f"  ✗ {resp.json().get('error',{}).get('message','Unknown error')}")
+        print(f"  ✗ {resp.json().get('error', {}).get('message', 'Unknown error')}")
 except Exception as e:
     print(f"  ✗ Error: {e}")
 
@@ -133,7 +143,9 @@ except Exception as e:
 print("\n── Test 5: Fresh auth with ONLY photoslibrary scope ──")
 print("  (This will open a browser window)")
 try:
-    PHOTOS_ONLY_TOKEN = Path.home() / "Desktop/StorageRationalizer/credentials/gphotos_only_token.json"
+    PHOTOS_ONLY_TOKEN = (
+        Path.home() / "Desktop/StorageRationalizer/credentials/gphotos_only_token.json"
+    )
     PHOTOS_SCOPE = ["https://www.googleapis.com/auth/photoslibrary.readonly"]
 
     pcreds = None
@@ -161,7 +173,7 @@ try:
         for item in items:
             print(f"    {item.get('filename')} — {item.get('mimeType')}")
     else:
-        print(f"  ✗ {resp.json().get('error',{}).get('message','Unknown error')}")
+        print(f"  ✗ {resp.json().get('error', {}).get('message', 'Unknown error')}")
 except Exception as e:
     print(f"  ✗ Error: {e}")
 

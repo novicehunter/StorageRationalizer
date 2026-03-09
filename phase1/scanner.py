@@ -19,10 +19,14 @@ Usage:
     python3 scanner.py --reset                                      # wipe and restart
 """
 
-import os, sys, json, hashlib, sqlite3, uuid, argparse, mimetypes
+import argparse
+import hashlib
+import json
+import mimetypes
+import sqlite3
+import uuid
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
@@ -65,10 +69,42 @@ PHOTO_EXTS = {
     ".arw",
     ".dng",
 }
-VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".wmv", ".flv", ".webm", ".3gp", ".mts", ".m2ts"}
-DOC_EXTS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md", ".pages", ".numbers", ".key"}
+VIDEO_EXTS = {
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".m4v",
+    ".wmv",
+    ".flv",
+    ".webm",
+    ".3gp",
+    ".mts",
+    ".m2ts",
+}
+DOC_EXTS = {
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".txt",
+    ".md",
+    ".pages",
+    ".numbers",
+    ".key",
+}
 SKIP_EXTS = {".ds_store", ".localized", ".tmp", ".temp", ".cache", ".log", ".icloud"}
-SKIP_DIRS = {".git", "node_modules", ".Trash", "__pycache__", ".cache", "Photos Library.photoslibrary"}
+SKIP_DIRS = {
+    ".git",
+    "node_modules",
+    ".Trash",
+    "__pycache__",
+    ".cache",
+    "Photos Library.photoslibrary",
+}
 
 
 # ── Database ───────────────────────────────────────────────────────────────────
@@ -160,7 +196,11 @@ def sha256_file(path):
 
 def categorize(ext):
     ext = ext.lower()
-    return (1 if ext in PHOTO_EXTS else 0, 1 if ext in VIDEO_EXTS else 0, 1 if ext in DOC_EXTS else 0)
+    return (
+        1 if ext in PHOTO_EXTS else 0,
+        1 if ext in VIDEO_EXTS else 0,
+        1 if ext in DOC_EXTS else 0,
+    )
 
 
 def should_skip(path):
@@ -278,13 +318,17 @@ def scan_local(conn, progress, task):
                         "file_ext": ext,
                         "file_size": stat.st_size,
                         "mime_type": mimetypes.guess_type(sp)[0] or "",
-                        "sha256_hash": sha256_file(path) if stat.st_size < 500 * 1024 * 1024 else None,
+                        "sha256_hash": (
+                            sha256_file(path) if stat.st_size < 500 * 1024 * 1024 else None
+                        ),
                         "created_at": (
                             datetime.fromtimestamp(stat.st_birthtime, timezone.utc).isoformat()
                             if hasattr(stat, "st_birthtime")
                             else None
                         ),
-                        "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                        "modified_at": datetime.fromtimestamp(
+                            stat.st_mtime, timezone.utc
+                        ).isoformat(),
                         "is_photo": p,
                         "is_video": v,
                         "is_document": d,
@@ -363,13 +407,18 @@ def scan_icloud_photos(conn, progress, task):
     try:
         import osxphotos
     except ImportError:
-        console.print("[red]osxphotos not installed. Run: pip3 install osxphotos --break-system-packages[/red]")
+        console.print(
+            "[red]osxphotos not installed. "
+            "Run: pip3 install osxphotos --break-system-packages[/red]"
+        )
         return stats
     if not PHOTOS_LIBRARY.exists():
         console.print(f"[yellow]Photos library not found: {PHOTOS_LIBRARY}[/yellow]")
         return stats
 
-    progress.update(task, description="[magenta]iCloud Photos[/magenta] Opening library (may take 30s)...")
+    progress.update(
+        task, description="[magenta]iCloud Photos[/magenta] Opening library (may take 30s)..."
+    )
     try:
         db = osxphotos.PhotosDB(str(PHOTOS_LIBRARY))
     except Exception as e:
@@ -380,7 +429,10 @@ def scan_icloud_photos(conn, progress, task):
     photos = db.photos(movies=True)
     total = len(photos)
     progress.update(
-        task, total=total, completed=0, description=f"[magenta]iCloud Photos[/magenta] {total:,} assets — scanning..."
+        task,
+        total=total,
+        completed=0,
+        description=f"[magenta]iCloud Photos[/magenta] {total:,} assets — scanning...",
     )
 
     for i, photo in enumerate(photos):
@@ -479,7 +531,7 @@ def scan_icloud_photos(conn, progress, task):
 
         except Exception as e:
             stats["errors"] += 1
-            log_error("icloud_photos", f"{getattr(photo,'uuid','?')}: {e}")
+            log_error("icloud_photos", f"{getattr(photo, 'uuid', '?')}: {e}")
 
         progress.update(task, completed=i + 1)
 
@@ -520,7 +572,10 @@ def scan_google_drive(conn, progress, task):
             f.write(creds.to_json())
 
     service = build("drive", "v3", credentials=creds)
-    fields = "nextPageToken, files(id,name,mimeType,size,md5Checksum,createdTime,modifiedTime,parents,driveId,imageMediaMetadata,videoMediaMetadata,trashed)"
+    fields = (
+        "nextPageToken, files(id,name,mimeType,size,md5Checksum,createdTime,"
+        "modifiedTime,parents,driveId,imageMediaMetadata,videoMediaMetadata,trashed)"
+    )
     pt = None
     while True:
         try:
@@ -548,7 +603,9 @@ def scan_google_drive(conn, progress, task):
             if mime.startswith("application/vnd.google-apps."):
                 continue
             stats["found"] += 1
-            progress.update(task, description=f"[green]Google Drive[/green] {f.get('name','')[:55]}")
+            progress.update(
+                task, description=f"[green]Google Drive[/green] {f.get('name', '')[:55]}"
+            )
             fid = f.get("id")
             if already_scanned(conn, "google_drive", fid):
                 continue
@@ -639,7 +696,10 @@ def scan_google_photos(conn, progress, task):
             if pt:
                 params["pageToken"] = pt
             resp = rl.get(
-                "https://photoslibrary.googleapis.com/v1/mediaItems", headers=headers, params=params, timeout=30
+                "https://photoslibrary.googleapis.com/v1/mediaItems",
+                headers=headers,
+                params=params,
+                timeout=30,
             )
             if resp.status_code == 401:
                 creds.refresh(Request())
@@ -655,7 +715,10 @@ def scan_google_photos(conn, progress, task):
 
         for item in data.get("mediaItems", []):
             stats["found"] += 1
-            progress.update(task, description=f"[magenta]Google Photos[/magenta] {item.get('filename','')[:55]}")
+            progress.update(
+                task,
+                description=f"[magenta]Google Photos[/magenta] {item.get('filename', '')[:55]}",
+            )
             iid = item.get("id")
             if already_scanned(conn, "google_photos", iid):
                 continue
@@ -727,7 +790,9 @@ def scan_onedrive(conn, progress, task):
         return stats
 
     app = msal.ConfidentialClientApplication(
-        client_id, authority=f"https://login.microsoftonline.com/{tenant_id}", client_credential=client_secret
+        client_id,
+        authority=f"https://login.microsoftonline.com/{tenant_id}",
+        client_credential=client_secret,
     )
 
     token = None
@@ -744,7 +809,11 @@ def scan_onedrive(conn, progress, task):
         token = result["access_token"]
         with open(token_file, "w") as f:
             json.dump(
-                {"access_token": token, "expires_at": datetime.now().timestamp() + result.get("expires_in", 3600)}, f
+                {
+                    "access_token": token,
+                    "expires_at": datetime.now().timestamp() + result.get("expires_in", 3600),
+                },
+                f,
             )
 
     headers = {"Authorization": f"Bearer {token}"}
@@ -762,10 +831,15 @@ def scan_onedrive(conn, progress, task):
 
             for item in data.get("value", []):
                 if "folder" in item:
-                    scan_folder(f"{base_url}/me/drive/items/{item['id']}/children", f"{folder_path}/{item['name']}")
+                    scan_folder(
+                        f"{base_url}/me/drive/items/{item['id']}/children",
+                        f"{folder_path}/{item['name']}",
+                    )
                     continue
                 stats["found"] += 1
-                progress.update(task, description=f"[yellow]OneDrive[/yellow] {item.get('name','')[:55]}")
+                progress.update(
+                    task, description=f"[yellow]OneDrive[/yellow] {item.get('name', '')[:55]}"
+                )
                 iid = item.get("id")
                 if already_scanned(conn, "onedrive", iid):
                     continue
@@ -789,7 +863,8 @@ def scan_onedrive(conn, progress, task):
                             "sha1_hash": hashes.get("sha1Hash", "").lower() or None,
                             "quick_xor_hash": hashes.get("quickXorHash") or None,
                             "created_at": fs.get("createdDateTime") or item.get("createdDateTime"),
-                            "modified_at": fs.get("lastModifiedDateTime") or item.get("lastModifiedDateTime"),
+                            "modified_at": fs.get("lastModifiedDateTime")
+                            or item.get("lastModifiedDateTime"),
                             "exif_date": im.get("takenDateTime"),
                             "latitude": im.get("latitude"),
                             "longitude": im.get("longitude"),
@@ -871,12 +946,15 @@ def print_summary(conn):
     """
     ).fetchone()
     if row and row["t"]:
-        console.print(f"  [bold magenta]iCloud Photos breakdown:[/bold magenta]")
+        console.print("  [bold magenta]iCloud Photos breakdown:[/bold magenta]")
         console.print(
-            f"    Total: {row['t']:,}  |  Downloaded locally: {row['dl']:,}  |  Cloud-only: {row['t']-row['dl']:,}"
+            f"    Total: {row['t']:,}  |  Downloaded locally: {row['dl']:,}"
+            f"  |  Cloud-only: {row['t']-row['dl']:,}"
         )
         console.print(
-            f"    Favorites: {row['fav']}  |  Live Photos: {row['live']}  |  Selfies: {row['sf']}  |  Portraits: {row['pt']}  |  Screenshots: {row['ss']}  |  Edited: {row['ed']}"
+            f"    Favorites: {row['fav']}  |  Live Photos: {row['live']}"
+            f"  |  Selfies: {row['sf']}  |  Portraits: {row['pt']}"
+            f"  |  Screenshots: {row['ss']}  |  Edited: {row['ed']}"
         )
         console.print()
 
@@ -895,7 +973,14 @@ def print_summary(conn):
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
-SCANNER_ORDER = ["local", "icloud_drive", "icloud_photos", "google_drive", "google_photos", "onedrive"]
+SCANNER_ORDER = [
+    "local",
+    "icloud_drive",
+    "icloud_photos",
+    "google_drive",
+    "google_photos",
+    "onedrive",
+]
 SCANNERS = {
     "local": ("MacBook Local", scan_local),
     "icloud_drive": ("iCloud Drive", scan_icloud_drive),
@@ -908,7 +993,9 @@ SCANNERS = {
 
 def main():
     parser = argparse.ArgumentParser(description="StorageRationalizer Phase 1 Scanner v2")
-    parser.add_argument("--sources", nargs="+", choices=list(SCANNERS.keys()) + ["all"], default=["all"])
+    parser.add_argument(
+        "--sources", nargs="+", choices=list(SCANNERS.keys()) + ["all"], default=["all"]
+    )
     parser.add_argument("--reset", action="store_true", help="Wipe manifest and start fresh")
     args = parser.parse_args()
 

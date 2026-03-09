@@ -22,11 +22,8 @@ Dependencies:
 
 from __future__ import annotations
 
-import base64
 import getpass
 import json
-import os
-import platform
 import secrets
 import sys
 import time
@@ -39,7 +36,9 @@ try:
     from cryptography.hazmat.primitives import hashes
     from cryptography.exceptions import InvalidTag
 except ImportError:
-    sys.exit("ERROR: 'cryptography' package not found.\n" "Install it with:  pip install cryptography")
+    sys.exit(
+        "ERROR: 'cryptography' package not found.\n" "Install it with:  pip install cryptography"
+    )
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -354,12 +353,14 @@ class CredentialsManager:
 
         if not enc_path.exists():
             raise FileNotFoundError(
-                f"No credentials found for service '{service}'. " f"Run save() first or migrate legacy files."
+                f"No credentials found for service '{service}'. "
+                f"Run save() first or migrate legacy files."
             )
 
         if not meta_path.exists():
             raise FileNotFoundError(
-                f"Metadata file missing for service '{service}' ({meta_path}). " "The encrypted store may be corrupted."
+                f"Metadata file missing for service '{service}' ({meta_path}). "
+                "The encrypted store may be corrupted."
             )
 
         # Load metadata
@@ -382,14 +383,19 @@ class CredentialsManager:
                 self._invalidate_cache()
                 remaining = _MAX_RETRIES - attempt
                 if remaining > 0:
-                    print(f"[credentials_manager] Wrong password. " f"{remaining} attempt(s) remaining.")
+                    print(
+                        f"[credentials_manager] Wrong password. "
+                        f"{remaining} attempt(s) remaining."
+                    )
                 else:
                     raise RuntimeError(
-                        f"Failed to decrypt credentials for service '{service}' " f"after {_MAX_RETRIES} attempts."
+                        f"Failed to decrypt credentials for service '{service}' "
+                        f"after {_MAX_RETRIES} attempts."
                     )
             except json.JSONDecodeError as exc:
                 raise RuntimeError(
-                    f"Decrypted data for service '{service}' is not valid JSON. " "The file may be corrupted."
+                    f"Decrypted data for service '{service}' is not valid JSON. "
+                    "The file may be corrupted."
                 ) from exc
 
         # Unreachable, but satisfies type checkers

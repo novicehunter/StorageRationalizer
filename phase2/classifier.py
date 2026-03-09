@@ -22,14 +22,14 @@ Usage:
     python3 classifier.py --sources onedrive icloud_photos  # subset
 """
 
-import sqlite3, json, csv, argparse
+import argparse
+import csv
+import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
-from collections import defaultdict
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
-from rich.table import Table
 
 console = Console()
 
@@ -327,8 +327,12 @@ def find_same_source_dupes(mconn, dconn, sources, progress, task) -> int:
             continue
 
         # Skip if already caught by hash dedup
-        group_id = make_group_id("internal", f"{row['source']}:{row['filename']}:{row['file_size']}")
-        existing = dconn.execute("SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)).fetchone()
+        group_id = make_group_id(
+            "internal", f"{row['source']}:{row['filename']}:{row['file_size']}"
+        )
+        existing = dconn.execute(
+            "SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)
+        ).fetchone()
         if existing:
             continue
 
@@ -414,13 +418,17 @@ def find_cross_source_dupes(mconn, dconn, sources, progress, task) -> int:
             continue
 
         group_id = make_group_id("cross", f"{row['filename']}:{row['file_size']}")
-        existing = dconn.execute("SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)).fetchone()
+        existing = dconn.execute(
+            "SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)
+        ).fetchone()
         if existing:
             continue
 
         # Confidence based on whether dates also match
         dates = set(
-            m.get("exif_date") or m.get("created_at", "") for m in members if m.get("exif_date") or m.get("created_at")
+            m.get("exif_date") or m.get("created_at", "")
+            for m in members
+            if m.get("exif_date") or m.get("created_at")
         )
         confidence = CONF_HIGH if len(dates) <= 1 else CONF_MEDIUM
 
@@ -506,7 +514,9 @@ def find_folder_dupes(mconn, dconn, sources, progress, task) -> int:
             continue
 
         group_id = make_group_id("archive", f"{row['filename']}:{row['file_size']}")
-        existing = dconn.execute("SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)).fetchone()
+        existing = dconn.execute(
+            "SELECT 1 FROM duplicate_groups WHERE group_id=?", (group_id,)
+        ).fetchone()
         if existing:
             continue
 
@@ -694,7 +704,10 @@ def write_savings_summary(dconn, mconn):
         ORDER BY wasted DESC
     """
     ):
-        lines.append(f"  {row['match_type']:<25} {row['groups']:>5,} groups   {format_size(row['wasted'])} recoverable")
+        wasted_str = format_size(row["wasted"])
+        lines.append(
+            f"  {row['match_type']:<25} {row['groups']:>5,} groups   {wasted_str} recoverable"
+        )
     lines.append("")
     lines.append("=" * 60)
 
@@ -750,30 +763,50 @@ def write_html_report(dconn, mconn, min_confidence: int):
         (min_confidence,),
     ).fetchall()
 
+    gen_time = datetime.now().strftime("%B %d, %Y at %H:%M")
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>StorageRationalizer — Duplicate Report</title>
+<title>StorageRationalizer &mdash; Duplicate Report</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f172a; color: #e2e8f0;
+  }}
   .header {{ background: linear-gradient(135deg, #1e3a5f, #1e40af); padding: 32px 40px; }}
   .header h1 {{ font-size: 28px; font-weight: 700; color: white; }}
   .header p {{ color: #93c5fd; margin-top: 6px; }}
   .container {{ max-width: 1400px; margin: 0 auto; padding: 32px 40px; }}
-  .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 32px; }}
-  .stat-card {{ background: #1e293b; border-radius: 12px; padding: 24px; border: 1px solid #334155; }}
+  .stats {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px; margin-bottom: 32px;
+  }}
+  .stat-card {{
+    background: #1e293b; border-radius: 12px;
+    padding: 24px; border: 1px solid #334155;
+  }}
   .stat-card .value {{ font-size: 32px; font-weight: 700; color: #60a5fa; }}
   .stat-card .label {{ font-size: 13px; color: #94a3b8; margin-top: 4px; }}
-  .section {{ background: #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 24px; border: 1px solid #334155; }}
+  .section {{
+    background: #1e293b; border-radius: 12px;
+    padding: 24px; margin-bottom: 24px; border: 1px solid #334155;
+  }}
   .section h2 {{ font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #f1f5f9; }}
   table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-  th {{ background: #0f172a; color: #94a3b8; padding: 10px 12px; text-align: left; font-weight: 600; border-bottom: 1px solid #334155; }}
+  th {{
+    background: #0f172a; color: #94a3b8; padding: 10px 12px;
+    text-align: left; font-weight: 600; border-bottom: 1px solid #334155;
+  }}
   td {{ padding: 10px 12px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }}
   tr:hover td {{ background: #263548; }}
-  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }}
+  .badge {{
+    display: inline-block; padding: 2px 8px;
+    border-radius: 9999px; font-size: 11px; font-weight: 600;
+  }}
   .badge-100 {{ background: #065f46; color: #6ee7b7; }}
   .badge-90  {{ background: #1e3a5f; color: #93c5fd; }}
   .badge-70  {{ background: #78350f; color: #fcd34d; }}
@@ -783,13 +816,23 @@ def write_html_report(dconn, mconn, min_confidence: int):
   .source-bar {{ display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }}
   .source-name {{ width: 160px; font-size: 13px; color: #94a3b8; }}
   .bar-track {{ flex: 1; background: #0f172a; border-radius: 4px; height: 20px; overflow: hidden; }}
-  .bar-fill {{ height: 100%; background: linear-gradient(90deg, #2563eb, #60a5fa); border-radius: 4px; transition: width 0.3s; }}
+  .bar-fill {{
+    height: 100%;
+    background: linear-gradient(90deg, #2563eb, #60a5fa);
+    border-radius: 4px; transition: width 0.3s;
+  }}
   .bar-label {{ width: 100px; font-size: 12px; color: #60a5fa; text-align: right; }}
-  .expand-btn {{ background: #334155; border: none; color: #94a3b8; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }}
+  .expand-btn {{
+    background: #334155; border: none; color: #94a3b8;
+    padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  }}
   .expand-btn:hover {{ background: #475569; color: #e2e8f0; }}
   .members-row {{ display: none; }}
   .members-row.open {{ display: table-row; }}
-  .members-table {{ width: 100%; background: #0f172a; border-radius: 8px; padding: 12px; margin: 4px 0; }}
+  .members-table {{
+    width: 100%; background: #0f172a;
+    border-radius: 8px; padding: 12px; margin: 4px 0;
+  }}
   .members-table td {{ padding: 6px 10px; font-size: 12px; border-bottom: 1px solid #1e293b; }}
   .type-badge {{ display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; }}
   .type-exact_hash {{ background: #064e3b; color: #6ee7b7; }}
@@ -801,8 +844,9 @@ def write_html_report(dconn, mconn, min_confidence: int):
 </head>
 <body>
 <div class="header">
-  <h1>StorageRationalizer — Duplicate Report</h1>
-  <p>Phase 2 Classification · Generated {datetime.now().strftime('%B %d, %Y at %H:%M')} · Min confidence: {min_confidence}%</p>
+  <h1>StorageRationalizer &mdash; Duplicate Report</h1>
+  <p>Phase 2 Classification &middot; Generated {gen_time}
+  &middot; Min confidence: {min_confidence}%</p>
 </div>
 <div class="container">
 
@@ -882,7 +926,10 @@ def write_html_report(dconn, mconn, min_confidence: int):
         <tr class="members-row" id="m{i}">
           <td colspan="7">
             <table class="members-table">
-              <tr><td><b>Action</b></td><td><b>Source</b></td><td><b>Filename</b></td><td><b>Size</b></td><td><b>Path / ID</b></td></tr>"""
+              <tr>
+                <td><b>Action</b></td><td><b>Source</b></td>
+                <td><b>Filename</b></td><td><b>Size</b></td><td><b>Path / ID</b></td>
+              </tr>"""
 
         for m in members:
             action_badge = "badge-keep" if m["action"] == "keep" else "badge-delete"
@@ -906,7 +953,9 @@ def write_html_report(dconn, mconn, min_confidence: int):
     </table>
   </div>
 
-  <p class="generated">StorageRationalizer Phase 2 · {datetime.now().strftime('%Y-%m-%d %H:%M')} · {stats['groups']:,} groups · {format_size(stats['wasted'])} recoverable</p>
+  <p class="generated">StorageRationalizer Phase 2
+  &middot; {datetime.now().strftime('%Y-%m-%d %H:%M')}
+  &middot; {stats['groups']:,} groups &middot; {format_size(stats['wasted'])} recoverable</p>
 </div>
 <script>
 function toggle(id) {{
@@ -927,7 +976,9 @@ function toggle(id) {{
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="StorageRationalizer Phase 2 Classifier")
-    parser.add_argument("--min-confidence", type=int, default=70, help="Minimum confidence threshold (default: 70)")
+    parser.add_argument(
+        "--min-confidence", type=int, default=70, help="Minimum confidence threshold (default: 70)"
+    )
     parser.add_argument(
         "--sources",
         nargs="+",
@@ -957,7 +1008,9 @@ def main():
 
     # Show what's in the manifest
     console.print("[bold]Files in manifest:[/bold]")
-    for row in mconn.execute("SELECT source, COUNT(*) c FROM files GROUP BY source ORDER BY c DESC"):
+    for row in mconn.execute(
+        "SELECT source, COUNT(*) c FROM files GROUP BY source ORDER BY c DESC"
+    ):
         console.print(f"  {row['source']:<20} {row['c']:>8,} files")
     console.print()
 
@@ -968,7 +1021,6 @@ def main():
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-
         task = progress.add_task("Classifying...", total=4)
 
         n1 = find_exact_hash_dupes(mconn, dconn, args.sources, progress, task)

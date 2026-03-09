@@ -16,7 +16,9 @@ class TestManifestDB:
     def test_insert_and_retrieve(self, manifest_conn):
         rec = make_file(source="macbook_local", filename="hello.pdf")
         insert_file(manifest_conn, rec)
-        row = manifest_conn.execute("SELECT * FROM files WHERE file_id=?", (rec["file_id"],)).fetchone()
+        row = manifest_conn.execute(
+            "SELECT * FROM files WHERE file_id=?", (rec["file_id"],)
+        ).fetchone()
         assert row is not None
         assert row["filename"] == "hello.pdf"
         assert row["source"] == "macbook_local"
